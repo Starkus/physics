@@ -47,6 +47,11 @@ void SetUpDevice()
 	glEnable(GL_DEPTH_TEST);
 }
 
+void SetBackfaceCullingEnabled(bool enable)
+{
+	enable ? glEnable(GL_CULL_FACE) : glDisable(GL_CULL_FACE);
+}
+
 void EnableDepthTest()
 {
 	glEnable(GL_DEPTH_TEST);

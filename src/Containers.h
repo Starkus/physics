@@ -1,90 +1,1017 @@
-#ifndef DECLARE_ARRAY
-#define DECLARE_ARRAY(_TYPE) \
-struct Array_##_TYPE \
-{ \
-	_TYPE *data; \
-	u32 size; \
-	DEBUG_ONLY(u32 capacity_;) \
-	\
-	_TYPE &operator[](int idx) \
-	{ \
-		ASSERT((u32)idx < capacity_); \
-		return data[idx]; \
-	} \
-	\
-	const _TYPE &operator[](int idx) const \
-	{ \
-		ASSERT((u32)idx < capacity_); \
-		return data[idx]; \
-	} \
-}; \
-\
-inline void ArrayInit_##_TYPE(Array_##_TYPE *array, u32 capacity, \
-		void *(*allocFunc)(u64)) \
-{ \
-	array->data = (_TYPE *)allocFunc(sizeof(_TYPE) * capacity); \
-	array->size = 0; \
-	DEBUG_ONLY(array->capacity_ = capacity;) \
-} \
-\
-inline _TYPE *ArrayAdd_##_TYPE(Array_##_TYPE *array) \
-{ \
-	ASSERT(array->size < array->capacity_); \
-	return &array->data[array->size++]; \
-} \
-\
-inline void ArrayRemove_##_TYPE(Array_##_TYPE *array, _TYPE *ptr) \
-{ \
-	ASSERT(ptr >= array->data && ptr < array->data + array->size); \
-	_TYPE *last = &array->data[--array->size]; \
-	*ptr = *last; \
-} \
-\
-inline u64 ArrayPointerToIndex_##_TYPE(Array_##_TYPE *array, _TYPE *ptr) \
-{ \
-	ASSERT(ptr >= array->data && ptr < array->data + array->size); \
-	const u64 offset = (u64)ptr - (u64)array->data; \
-	return offset / sizeof(_TYPE); \
-}
+template <typename T>
+struct ArrayView
+{
+	T *data;
+	u32 count;
+
+	T &operator[](s64 idx)
+	{
+#if DEBUG_BUILD
+		ASSERT((u64)idx < count);
+#endif
+		return data[idx];
+	}
+
+	const T &operator[](s64 idx) const
+	{
+#if DEBUG_BUILD
+		ASSERT(idx >= 0 && (u64)idx < count);
+#endif
+		return data[idx];
+	}
+};
+
+template <typename T, typename A>
+struct Array
+{
+	T *data;
+	u32 count;
+#if DEBUG_BUILD
+	u32 _capacity;
 #endif
 
-#ifndef DECLARE_DYNAMIC_ARRAY
-#define DECLARE_DYNAMIC_ARRAY(_TYPE) \
-struct DynamicArray_##_TYPE \
-{ \
-	_TYPE *data; \
-	u32 size; \
-	u32 capacity; \
-	\
-	_TYPE &operator[](int idx) \
-	{ \
-		ASSERT((u32)idx < capacity); \
-		return data[idx]; \
-	} \
-	\
-	const _TYPE &operator[](int idx) const \
-	{ \
-		ASSERT((u32)idx < capacity); \
-		return data[idx]; \
-	} \
-}; \
-\
-inline void DynamicArrayInit_##_TYPE(DynamicArray_##_TYPE *array, u32 capacity, \
-		void *(*allocFunc)(u64)) \
-{ \
-	array->data = (_TYPE *)allocFunc(sizeof(_TYPE) * capacity); \
-	array->size = 0; \
-	array->capacity = capacity; \
-} \
-\
-inline _TYPE *DynamicArrayAdd_##_TYPE(DynamicArray_##_TYPE *array, \
-		void *(*reallocFunc)(void *, u64)) \
-{ \
-	if (array->size >= array->capacity) \
-	{ \
-		array->capacity *= 2; \
-		array->data = (_TYPE *)reallocFunc(array->data, array->capacity * sizeof(_TYPE)); \
-	} \
-	return &array->data[array->size++]; \
-}
+	T &operator[](s64 idx)
+	{
+#if DEBUG_BUILD
+		ASSERT((u64)idx < count);
+		ASSERT((u64)idx < _capacity);
 #endif
+		return data[idx];
+	}
+
+	const T &operator[](s64 idx) const
+	{
+#if DEBUG_BUILD
+		ASSERT((u64)idx < count);
+		ASSERT((u64)idx < _capacity);
+#endif
+		return data[idx];
+	}
+
+	operator ArrayView<T>()
+	{
+		return { data, count };
+	}
+
+	operator ArrayView<const T>() const
+	{
+		return { data, count };
+	}
+};
+
+template <typename T, typename A>
+void ArrayInit(Array<T, A> *array, u32 capacity)
+{
+	array->data = (T*)A::Alloc(sizeof(T) * capacity, alignof(T));
+	array->count = 0;
+#if DEBUG_BUILD
+	array->_capacity = capacity;
+#endif
+}
+
+template <typename T, typename A>
+T *ArrayAdd(Array<T, A> *array)
+{
+	T *result = &array->data[array->count++];
+#if DEBUG_BUILD
+	ASSERT(array->count <= array->_capacity);
+#endif
+	return result;
+}
+
+// Good for when another thread is reading this array and we don't want to use locks.
+template <typename T, typename A>
+void ArrayAddMT(Array<T, A> *array, T value)
+{
+	array->data[array->count] = value;
+	++array->count;
+#if DEBUG_BUILD
+	ASSERT(array->count <= array->_capacity);
+#endif
+}
+
+template <typename T, typename A>
+inline T *ArrayBack(Array<T, A> *array)
+{
+	ASSERT(array->count > 0);
+	return &array->data[array->count - 1];
+}
+
+template <typename T, typename A>
+inline u64 ArrayPointerToIndex(Array<T, A> *array, void* pointer)
+{
+	//ASSERT(pointer >= (void*)array->data);
+	//ASSERT(pointer < (void*)(array->data + array->count));
+	return ((u64)pointer - (u64)array->data) / sizeof(T);
+}
+
+template <typename T, u64 capacity>
+struct FixedArray
+{
+	T data[capacity];
+	u64 count;
+
+	T &operator[](s64 idx)
+	{
+		ASSERT(idx >= 0 && (u64)idx < capacity);
+		return data[idx];
+	}
+
+	const T &operator[](s64 idx) const
+	{
+		ASSERT(idx >= 0 && (u64)idx < capacity);
+		return data[idx];
+	}
+
+	operator ArrayView<T>()
+	{
+		return { data, count };
+	}
+
+	operator ArrayView<const T>() const
+	{
+		return { data, count };
+	}
+};
+
+template <typename T, u64 capacity>
+T *FixedArrayAdd(FixedArray<T, capacity> *array)
+{
+	ASSERT(array->count < capacity);
+	T *result = &array->data[array->count++];
+	return result;
+}
+
+template <typename T, u64 capacity>
+inline T *FixedArrayBack(FixedArray<T, capacity> *array)
+{
+	ASSERT(array->count > 0);
+	return &array->data[array->count - 1];
+}
+
+template <typename T, typename A>
+struct DynamicArray
+{
+	T *data;
+	u64 count;
+	u64 capacity;
+
+	T &operator[](s64 idx)
+	{
+		ASSERT(idx >= 0 && (u64)idx < capacity);
+		return data[idx];
+	}
+
+	const T &operator[](s64 idx) const
+	{
+		ASSERT(idx >= 0 && (u64)idx < capacity);
+		return data[idx];
+	}
+
+	operator ArrayView<T>()
+	{
+		return { data, count };
+	}
+
+	operator ArrayView<const T>() const
+	{
+		return { data, count };
+	}
+};
+
+template <typename T, typename A>
+void DynamicArrayInit(DynamicArray<T, A> *array, u64 initialCapacity)
+{
+	ASSERT(initialCapacity);
+	array->data = (T*)A::Alloc(sizeof(T) * initialCapacity, alignof(T));
+	array->count = 0;
+	array->capacity = initialCapacity;
+}
+
+template <typename T, typename A>
+T *DynamicArrayAdd(DynamicArray<T, A> *array)
+{
+	ASSERT(array->capacity != 0);
+	if (array->count >= array->capacity) {
+		u64 newCapacity = array->capacity * 2;
+		array->data = (T*)A::Realloc(array->data, array->capacity * sizeof(T),
+				newCapacity * sizeof(T), alignof(T));
+		array->capacity = newCapacity;
+
+#if ENABLE_STATS
+		AtomicIncrementGetNew(&g_stats.dynamicArrayReallocs);
+#endif
+	}
+	return &array->data[array->count++];
+}
+
+// Good for when another thread is reading this array and we don't want to use locks.
+template <typename T, typename A>
+T *DynamicArrayAddMT(DynamicArray<T, A> *array, T value)
+{
+	ASSERT(array->capacity != 0);
+	if (array->count >= array->capacity) {
+		u64 newCapacity = array->capacity * 2;
+		array->data = (T*)A::Realloc(array->data, array->capacity * sizeof(T),
+				newCapacity * sizeof(T), alignof(T));
+		array->capacity = newCapacity;
+
+#if ENABLE_STATS
+		AtomicIncrementGetNew(&g_stats.dynamicArrayReallocs);
+#endif
+	}
+	T *result = &array->data[array->count];
+	*result = value;
+	++array->count;
+	return result;
+}
+
+template <typename T, typename A>
+T *DynamicArrayAddMany(DynamicArray<T, A> *array, s64 count)
+{
+	u64 newSize = array->count + count;
+	u64 newCapacity = array->capacity;
+	while (newSize > newCapacity)
+		newCapacity *= 2;
+	if (newCapacity != array->capacity) {
+		array->data = (T*)A::Realloc(array->data, array->capacity * sizeof(T),
+				newCapacity * sizeof(T), alignof(T));
+		array->capacity = newCapacity;
+
+#if ENABLE_STATS
+		AtomicIncrementGetNew(&g_stats.dynamicArrayReallocs);
+#endif
+	}
+
+	T *first = &array->data[array->count];
+	array->count = newSize;
+	return first;
+}
+
+template <typename T, typename A>
+bool DynamicArrayAddUnique(DynamicArray<T, A> *array, T value)
+{
+	for (int i = 0; i < array->count; ++i) {
+		if ((*array)[i] == value)
+			return false;
+	}
+	if (array->count >= array->capacity) {
+		u64 newCapacity = array->capacity * 2;
+		array->data = (T*)A::Realloc(array->data, array->capacity * sizeof(T),
+				newCapacity * sizeof(T), alignof(T));
+		array->capacity = newCapacity;
+
+#if ENABLE_STATS
+		AtomicIncrementGetNew(&g_stats.dynamicArrayReallocs);
+#endif
+	}
+	array->data[array->count++] = value;
+	return true;
+}
+
+template <typename T, typename A>
+void DynamicArraySwapRemove(DynamicArray<T, A> *array, u64 idx)
+{
+	ASSERT(array->count > 0);
+	(*array)[idx] = array->data[--array->count];
+}
+
+template <typename T, typename A>
+void DynamicArrayRemoveOrdered(DynamicArray<T, A> *array, u64 idx)
+{
+	ASSERT(array->count > 0);
+	ASSERT(idx >= 0 && (u64)idx < array->capacity);
+	memmove(&array->data[idx], &array->data[idx + 1], (array->count - idx - 1) * sizeof(T));
+	--array->count;
+}
+
+template <typename T, typename A>
+T *DynamicArrayBack(DynamicArray<T, A> *array)
+{
+	ASSERT(array->count > 0);
+	return &array->data[array->count - 1];
+}
+
+template <typename T, typename A>
+void DynamicArrayCopy(DynamicArray<T, A> *dst,
+		DynamicArray<T, A> *src)
+{
+	ASSERT(dst->capacity >= src->count);
+	dst->count = src->count;
+	memcpy(dst->data, src->data, src->count * sizeof(T));
+}
+
+template <typename T>
+struct BucketArrayView
+{
+	ArrayView<T *> buckets;
+	u64 count;
+	u64 bucketSize;
+
+	T &operator[](s64 idx)
+	{
+		s64 bucketIdx = idx / bucketSize;
+		ASSERT((u64)bucketIdx < buckets.count);
+
+		return buckets[bucketIdx][idx % bucketSize];
+	}
+
+	const T &operator[](s64 idx) const
+	{
+		s64 bucketIdx = idx / bucketSize;
+		ASSERT((u64)bucketIdx < buckets.count);
+
+		return buckets[bucketIdx][idx % bucketSize];
+	}
+};
+
+template <typename T>
+T *BucketArrayViewBack(BucketArrayView<T> *bucketArray)
+{
+	ASSERT(bucketArray->buckets.count > 0);
+	return &(*ArrayViewBack(&bucketArray->buckets))[bucketArray->count % bucketArray->bucketSize];
+}
+
+template <typename T, typename A, u64 bucketSize>
+struct BucketArray
+{
+	DynamicArray<T *, A> buckets;
+	u64 count;
+
+	T &operator[](s64 idx)
+	{
+		s64 bucketIdx = idx / bucketSize;
+		ASSERT((u64)bucketIdx < buckets.count);
+		ASSERT((u64)idx < count);
+		return buckets[bucketIdx][idx % bucketSize];
+	}
+
+	const T &operator[](s64 idx) const
+	{
+		s64 bucketIdx = idx / bucketSize;
+		ASSERT((u64)bucketIdx < buckets.count);
+		ASSERT((u64)idx < count);
+		return buckets[bucketIdx][idx % bucketSize];
+	}
+
+	operator BucketArrayView<T>()
+	{
+		BucketArrayView<T> result;
+		result.buckets = buckets;
+		result.count = count;
+		result.bucketSize = bucketSize;
+		return result;
+	}
+
+	operator BucketArrayView<const T>() const
+	{
+		BucketArrayView<T> result;
+		result.buckets = buckets;
+		result.count = count;
+		result.bucketSize = bucketSize;
+		return result;
+	}
+};
+
+template <typename T, typename A, u64 bucketSize>
+T *BucketArrayAllocateNewBucket(BucketArray<T, A, bucketSize> *bucketArray)
+{
+	T *newBucket = (T *)A::Alloc(sizeof(T) * bucketSize, alignof(T));
+	// Call AddMT so we can call BucketArrayCount without locking without risking reading an
+	// invalid bucket.
+	DynamicArrayAddMT(&bucketArray->buckets, newBucket);
+	return newBucket;
+}
+
+template <typename T, typename A, u64 bucketSize>
+void BucketArrayInit(BucketArray<T, A, bucketSize> *bucketArray)
+{
+	bucketArray->count = 0;
+	DynamicArrayInit(&bucketArray->buckets, 4);
+
+	// Start with one bucket
+	BucketArrayAllocateNewBucket(bucketArray);
+}
+
+template <typename T, typename A, u64 bucketSize>
+T *BucketArrayAdd(BucketArray<T, A, bucketSize> *bucketArray)
+{
+	ASSERT(bucketArray->buckets.count > 0);
+	u64 lastBucketCount = bucketArray->count % bucketSize;
+	u64 bucketIdx = bucketArray->count / bucketSize;
+
+	T *bucket;
+	if (bucketIdx >= bucketArray->buckets.count) {
+		bucket = BucketArrayAllocateNewBucket(bucketArray);
+		lastBucketCount = 0;
+	}
+	else
+		bucket = bucketArray->buckets[bucketIdx];
+
+	++bucketArray->count;
+	return &bucket[lastBucketCount];
+}
+
+// Good for when another thread is reading this array and we don't want to use locks.
+template <typename T, typename A, u64 bucketSize>
+void BucketArrayAddMT(BucketArray<T, A, bucketSize> *bucketArray, T value)
+{
+	ASSERT(bucketArray->buckets.count > 0);
+	u64 lastBucketCount = bucketArray->count % bucketSize;
+	u64 bucketIdx = bucketArray->count / bucketSize;
+
+	T *bucket;
+	if (lastBucketCount >= bucketSize) {
+		bucket = BucketArrayAllocateNewBucket(bucketArray);
+		lastBucketCount = 0;
+	}
+	else
+		bucket = bucketArray->buckets[bucketIdx];
+
+	bucket[lastBucketCount] = value;
+	++bucketArray->count;
+}
+
+template <typename T, typename A, u64 bucketSize>
+T *BucketArrayBack(BucketArray<T, A, bucketSize> *bucketArray)
+{
+	ASSERT(bucketArray->buckets.count > 0);
+	return &(*DynamicArrayBack(&bucketArray->buckets))[bucketArray->count % bucketSize];
+}
+
+template <typename T>
+inline bool BitfieldGetBit(T array, int index)
+{
+	ASSERT(IsPowerOf2(sizeof(array[0])));
+	constexpr u8 shiftAmm = Ntz64Constexpr(sizeof(array[0]) * 8);
+	constexpr u8 bitIdx = (sizeof(array[0]) * 8) - 1;
+	return array[index >> shiftAmm] & (1ull << (index & bitIdx));
+}
+
+template <typename T>
+inline void BitfieldSetBit(T array, int index)
+{
+	ASSERT(IsPowerOf2(sizeof(array[0])));
+	constexpr u8 shiftAmm = Ntz64Constexpr(sizeof(array[0]) * 8);
+	constexpr u8 bitIdx = (sizeof(array[0]) * 8) - 1;
+	array[index >> shiftAmm] |= (1ull << (index & bitIdx));
+}
+
+template <typename T>
+inline void BitfieldClearBit(T array, int index)
+{
+	ASSERT(IsPowerOf2(sizeof(array[0])));
+	constexpr u8 shiftAmm = Ntz64Constexpr(sizeof(array[0]) * 8);
+	constexpr u8 bitIdx = (sizeof(array[0]) * 8) - 1;
+	array[index >> shiftAmm] &= ~(1ull << (index & bitIdx));
+}
+
+template <typename T>
+inline u64 BitfieldCount(T *array, u64 count)
+{
+	ASSERTC(sizeof(T) % sizeof(u32) == 0);
+	u64 count = 0;
+	T *end = array + count;
+	for (u32 *scan = (u32 *)array; scan < end; ++scan)
+		count += CountOnes(*scan);
+	return count;
+}
+
+// Specialization to use popcnt64
+inline u64 BitfieldCount(u64 *array, u64 count)
+{
+	u64 result = 0;
+	u64 *end = array + count;
+	for (u64 *scan = array; scan < end; ++scan)
+		result += CountOnes64(*scan);
+	return result;
+}
+
+template <typename T>
+inline u64 BitfieldCount(ArrayView<T> array)
+{
+	ASSERT(sizeof(T) % sizeof(u32) == 0);
+	u64 count = 0;
+	T *end = array.data + array.count;
+	for (u32 *scan = (u32 *)array.data; scan < end; ++scan)
+		count += CountOnes(*scan);
+	return count;
+}
+
+// Specialization to use popcnt64
+inline u64 BitfieldCount(ArrayView<u64> array)
+{
+	u64 count = 0;
+	u64 *end = array.data + array.count;
+	for (u64 *scan = array.data; scan < end; ++scan)
+		count += CountOnes64(*scan);
+	return count;
+}
+
+// From https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+u32 Hash(u32 value)
+{
+	value = ((value >> 16) ^ value) * 0x45d9f3b;
+	value = ((value >> 16) ^ value) * 0x45d9f3b;
+	value = ((value >> 16) ^ value);
+	return value;
+}
+
+// djb2 from http://www.cse.yorku.ca/~oz/hash.html
+u32 Hash(String value)
+{
+	u32 hash = 5381;
+
+	const char *scan = value.data;
+	for (int i = 0; i < value.size; ++i)
+		hash = ((hash << 5) + hash) + *scan; // hash * 33 + *scan
+
+	return hash;
+}
+
+template <typename K, typename A>
+struct HashSet
+{
+	void *memory;
+	u32 capacity;
+};
+
+template <typename K, typename A>
+inline void HashSetClear(HashSet<K,A> hashSet)
+{
+	memset(hashSet.memory, 0, hashSet.capacity >> 3);
+}
+
+template <typename K, typename A>
+inline void HashSetInit(HashSet<K,A> *hashSet, u32 capacity)
+{
+	ASSERT(IsPowerOf2(capacity) && capacity >= 32);
+
+	u64 bookkeepSize = capacity >> 3; // divide by 8
+	u64 keyMemorySize = capacity * sizeof(K);
+	hashSet->memory = A::Alloc(bookkeepSize + keyMemorySize, alignof(K));
+	hashSet->capacity = capacity;
+
+	HashSetClear(*hashSet);
+}
+
+template <typename K, typename A>
+inline K *HashSetKeys(HashSet<K,A> hashSet)
+{
+	u64 bookkeepSize = hashSet.capacity >> 3;
+	return (K *)((u8 *)hashSet.memory + bookkeepSize);
+}
+
+template <typename K, typename A>
+inline bool HashSetSlotOccupied(HashSet<K,A> hashSet, u32 slotIdx)
+{
+	u32 *bookkeep = (u32 *)hashSet.memory;
+	return BitfieldGetBit(bookkeep, slotIdx);
+}
+
+template <typename K, typename A>
+bool HashSetHas(HashSet<K,A> hashSet, K key)
+{
+	ASSERT(IsPowerOf2(hashSet.capacity));
+	u32 mask = hashSet.capacity - 1;
+	u32 slotIdx = Hash(key) & mask;
+
+	K *keys = HashSetKeys(hashSet);
+
+	K foundKey;
+	for (u32 iterations = 0; iterations < hashSet.capacity; ++iterations)
+	{
+		if (!HashSetSlotOccupied(hashSet, slotIdx))
+			return false;
+		foundKey = keys[slotIdx];
+		if (foundKey == key) {
+#if ENABLE_STATS
+			switch (iterations) {
+			case 0:  AtomicIncrementGetNew(&g_stats.hashSetMapHit0); break;
+			case 1:  AtomicIncrementGetNew(&g_stats.hashSetMapHit1); break;
+			case 2:  AtomicIncrementGetNew(&g_stats.hashSetMapHit2); break;
+			case 3:  AtomicIncrementGetNew(&g_stats.hashSetMapHit3); break;
+			default: AtomicIncrementGetNew(&g_stats.hashSetMapHitMore); break;
+			};
+#endif
+			return true;
+		}
+		slotIdx = (slotIdx + 1) & mask;
+	}
+	return false;
+}
+
+template <typename K, typename A>
+u64 HashSetCount(HashSet<K,A> hashSet)
+{
+	return BitfieldCount((u32 *)hashSet.memory, hashSet.capacity >> 5);
+}
+
+template <typename A>
+void HashSetPrint(HashSet<u32,A> hashSet)
+{
+	Print("{ ");
+	bool first = true;
+	for (u32 slotIdx = 0; slotIdx < hashSet.capacity; ++slotIdx)
+		if (HashSetSlotOccupied(hashSet, slotIdx))
+		{
+			if (!first)
+				Print(", ");
+			Print("%u", hashSet.keys[slotIdx]);
+			first = false;
+		}
+	Print(" }\n");
+}
+
+template <typename K, typename A>
+void HashSetRehash(HashSet<K,A> *hashSet)
+{
+	u32 oldCapacity = hashSet->capacity;
+	u32 *oldBookkeep = (u32 *)hashSet->memory;
+	K *oldKeys = HashSetKeys(*hashSet);
+
+	HashSetInit(hashSet, oldCapacity << 1);
+
+	for (u32 slotIdx = 0; slotIdx < oldCapacity; ++slotIdx)
+		if (BitfieldGetBit(oldBookkeep, slotIdx))
+			HashSetAdd(hashSet, oldKeys[slotIdx]);
+
+	A::Free(oldBookkeep);
+
+#if ENABLE_STATS
+	AtomicIncrementGetNew(&g_stats.hashSetMapRehashes);
+#endif
+}
+
+template <typename K, typename A>
+bool HashSetAdd(HashSet<K,A> *hashSet, K key)
+{
+	ASSERT(IsPowerOf2(hashSet->capacity));
+	u32 mask = hashSet->capacity - 1;
+	u32 slotIdx = Hash(key) & mask;
+
+	K *keys = HashSetKeys(*hashSet);
+
+	K foundKey;
+	u32 maxIterationsSquared = hashSet->capacity;
+	for (u32 iterations = 0; iterations * iterations < maxIterationsSquared; ++iterations)
+	{
+		if (!HashSetSlotOccupied(*hashSet, slotIdx))
+			goto add;
+		foundKey = keys[slotIdx];
+		if (foundKey == key) {
+#if ENABLE_STATS
+			switch (iterations) {
+			case 0:  AtomicIncrementGetNew(&g_stats.hashSetMapHit0); break;
+			case 1:  AtomicIncrementGetNew(&g_stats.hashSetMapHit1); break;
+			case 2:  AtomicIncrementGetNew(&g_stats.hashSetMapHit2); break;
+			case 3:  AtomicIncrementGetNew(&g_stats.hashSetMapHit3); break;
+			default: AtomicIncrementGetNew(&g_stats.hashSetMapHitMore); break;
+			};
+#endif
+			return false;
+		}
+		slotIdx = (slotIdx + 1) & mask;
+	}
+
+	// Full!
+	HashSetRehash(hashSet);
+	HashSetAdd(hashSet, key);
+	return true;
+
+add:
+	// Add!
+	u32 *bookkeep = (u32 *)hashSet->memory;
+	BitfieldSetBit(bookkeep, slotIdx);
+	keys[slotIdx] = key;
+	return true;
+}
+
+template <typename K, typename A>
+bool HashSetRemove(HashSet<K,A> *hashSet, K key)
+{
+	ASSERT(IsPowerOf2(hashSet->capacity));
+	u32 mask = hashSet->capacity - 1;
+	u32 slotIdx = Hash(key) & mask;
+
+	K *keys = HashSetKeys(*hashSet);
+
+	K foundKey;
+	for (u32 iterations = 0; iterations < hashSet->capacity; ++iterations)
+	{
+		if (!HashSetSlotOccupied(*hashSet, slotIdx))
+			return false;
+		foundKey = keys[slotIdx];
+		if (foundKey == key)
+		{
+			// Remove
+			u32 *bookkeep = (u32 *)hashSet->memory;
+			BitfieldClearBit(bookkeep, slotIdx);
+			return true;
+		}
+		slotIdx = (slotIdx + 1) & mask;
+	}
+	return false;
+}
+
+template <typename K, typename V, typename A>
+struct HashMap
+{
+	void *memory;
+	u32 capacity;
+};
+
+template <typename K, typename V, typename A>
+inline void HashMapClear(HashMap<K,V,A> hashMap)
+{
+	memset(hashMap.memory, 0, hashMap.capacity >> 3);
+}
+
+template <typename K, typename V, typename A>
+inline void HashMapInit(HashMap<K,V,A> *hashMap, u32 capacity)
+{
+	ASSERT(IsPowerOf2(capacity) && capacity >= 32);
+
+	u64 bookkeepSize = capacity >> 3;
+	u64 keyMemorySize = capacity * sizeof(K);
+	u64 valueMemorySize = capacity * sizeof(V);
+	hashMap->memory = A::Alloc(bookkeepSize + keyMemorySize + valueMemorySize, alignof(K));
+	hashMap->capacity = capacity;
+
+	HashMapClear(*hashMap);
+}
+
+template <typename K, typename V, typename A>
+inline K *HashMapKeys(HashMap<K,V,A> hashMap)
+{
+	u64 bookkeepSize = hashMap.capacity >> 3;
+	return (K *)((u8 *)hashMap.memory + bookkeepSize);
+}
+
+template <typename K, typename V, typename A>
+inline V *HashMapValues(HashMap<K,V,A> hashMap)
+{
+	u64 bookkeepSize = hashMap.capacity >> 3;
+	u64 keyMemorySize = hashMap.capacity * sizeof(K);
+	return (V *)((u8 *)hashMap.memory + bookkeepSize + keyMemorySize);
+}
+
+template <typename K, typename V, typename A>
+inline bool HashMapSlotOccupied(HashMap<K,V,A> hashMap, u32 slotIdx)
+{
+	u32 *bookkeep = (u32 *)hashMap.memory;
+	return BitfieldGetBit(bookkeep, slotIdx);
+}
+
+template <typename K, typename V, typename A>
+V *HashMapGet(HashMap<K,V,A> hashMap, K key)
+{
+	ASSERT(IsPowerOf2(hashMap.capacity));
+	u32 mask = hashMap.capacity - 1;
+	u32 slotIdx = Hash(key) & mask;
+
+	K *keys = HashMapKeys(hashMap);
+	V *values = HashMapValues(hashMap);
+
+	K foundKey;
+	for (u32 iterations = 0; iterations < hashMap.capacity; ++iterations)
+	{
+		if (!HashMapSlotOccupied(hashMap, slotIdx))
+			break;
+		foundKey = keys[slotIdx];
+		if (foundKey == key) {
+#if ENABLE_STATS
+			switch (iterations) {
+			case 0:  AtomicIncrementGetNew(&g_stats.hashSetMapHit0); break;
+			case 1:  AtomicIncrementGetNew(&g_stats.hashSetMapHit1); break;
+			case 2:  AtomicIncrementGetNew(&g_stats.hashSetMapHit2); break;
+			case 3:  AtomicIncrementGetNew(&g_stats.hashSetMapHit3); break;
+			default: AtomicIncrementGetNew(&g_stats.hashSetMapHitMore); break;
+			};
+#endif
+			return &values[slotIdx];
+		}
+		slotIdx = (slotIdx + 1) & mask;
+	}
+	return nullptr;
+}
+
+template <typename K, typename V, typename A>
+void HashMapRehash(HashMap<K,V,A> *hashMap)
+{
+	u32 oldCapacity = hashMap->capacity;
+	u32 *oldBookkeep = (u32 *)hashMap->memory;
+	K *oldKeys = HashMapKeys(*hashMap);
+	V *oldValues = HashMapValues(*hashMap);
+
+	HashMapInit(hashMap, oldCapacity << 1);
+
+	for (u32 i = 0; i < oldCapacity; ++i)
+		if (BitfieldGetBit(oldBookkeep, i))
+			*HashMapGetOrAdd(hashMap, oldKeys[i]) = oldValues[i];
+
+	A::Free(oldBookkeep);
+
+#if ENABLE_STATS
+	AtomicIncrementGetNew(&g_stats.hashSetMapRehashes);
+#endif
+}
+
+template <typename K, typename V, typename A>
+V *HashMapGetOrAdd(HashMap<K,V,A> *hashMap, K key)
+{
+	ASSERT(IsPowerOf2(hashMap->capacity));
+	u32 mask = hashMap->capacity - 1;
+	u32 slotIdx = Hash(key) & mask;
+
+	K *keys = HashMapKeys(*hashMap);
+	V *values = HashMapValues(*hashMap);
+
+	K foundKey;
+	u32 maxIterationsSquared = hashMap->capacity;
+	for (u32 iterations = 0; iterations * iterations < maxIterationsSquared; ++iterations)
+	{
+		if (!HashMapSlotOccupied(*hashMap, slotIdx))
+			goto add;
+		foundKey = keys[slotIdx];
+		if (foundKey == key) {
+#if ENABLE_STATS
+			switch (iterations) {
+			case 0:  AtomicIncrementGetNew(&g_stats.hashSetMapHit0); break;
+			case 1:  AtomicIncrementGetNew(&g_stats.hashSetMapHit1); break;
+			case 2:  AtomicIncrementGetNew(&g_stats.hashSetMapHit2); break;
+			case 3:  AtomicIncrementGetNew(&g_stats.hashSetMapHit3); break;
+			default: AtomicIncrementGetNew(&g_stats.hashSetMapHitMore); break;
+			};
+#endif
+			return &values[slotIdx];
+		}
+		slotIdx = (slotIdx + 1) & mask;
+	}
+
+	// Full!
+	HashMapRehash(hashMap);
+	return HashMapGetOrAdd(hashMap, key);
+
+add:
+	// Add!
+	u32 *bookkeep = (u32 *)hashMap->memory;
+	BitfieldSetBit(bookkeep, slotIdx);
+	keys[slotIdx] = key;
+	return &values[slotIdx];
+}
+
+template <typename K, typename V, typename A>
+bool HashMapRemove(HashMap<K,V,A> *hashMap, K key)
+{
+	ASSERT(IsPowerOf2(hashMap->capacity));
+	u32 mask = hashMap->capacity - 1;
+	u32 slotIdx = Hash(key) & mask;
+
+	K *keys = HashMapKeys(*hashMap);
+
+	K foundKey;
+	for (u32 iterations = 0; iterations < hashMap->capacity; ++iterations)
+	{
+		if (!HashMapSlotOccupied(*hashMap, slotIdx))
+			return false;
+		foundKey = keys[slotIdx];
+		if (foundKey == key)
+		{
+			// Remove
+			u32 *bookkeep = (u32 *)hashMap->memory;
+			BitfieldClearBit(bookkeep, slotIdx);
+			return true;
+		}
+		slotIdx = (slotIdx + 1) & mask;
+	}
+	return false;
+}
+
+bool PresentInBigArray(u32 *buffer, u64 count, u32 item)
+{
+	__m256i itemX8 = _mm256_set1_epi32(item);
+	u32 currentIdx = 0;
+	// Align to 32 bytes
+	while (((u64)&buffer[currentIdx] & 31) && currentIdx < count)
+	{
+		if (buffer[currentIdx] == item)
+			return true;
+		++currentIdx;
+	}
+	while (currentIdx + 8 <= count)
+	{
+		__m256i res = _mm256_cmpeq_epi32(itemX8, *(__m256i *)&buffer[currentIdx]);
+		u32 mask = _mm256_movemask_ps(_mm256_castsi256_ps(res));
+		if (mask)
+			return true;
+		currentIdx += 8;
+	}
+	// Leftovers
+	while (currentIdx < count)
+	{
+		if (buffer[currentIdx] == item)
+			return true;
+		++currentIdx;
+	}
+	return false;
+}
+
+u64 FindInBigArray(u32 *buffer, u64 count, u32 item)
+{
+	__m256i itemX8 = _mm256_set1_epi32(item);
+	u32 currentIdx = 0;
+	// Align to 32 bytes
+	while (((u64)&buffer[currentIdx] & 31) && currentIdx < count)
+	{
+		if (buffer[currentIdx] == item)
+			return currentIdx;
+		++currentIdx;
+	}
+	while (currentIdx + 8 <= count)
+	{
+		__m256i res = _mm256_cmpeq_epi32(itemX8, *(__m256i *)&buffer[currentIdx]);
+		u32 mask = _mm256_movemask_ps(_mm256_castsi256_ps(res));
+		if (mask)
+			return 31 - Nlz(mask) + currentIdx;
+		currentIdx += 8;
+	}
+	// Leftovers
+	while (currentIdx < count)
+	{
+		if (buffer[currentIdx] == item)
+			return currentIdx;
+		++currentIdx;
+	}
+	return U64_MAX;
+}
+
+template <typename T>
+struct MTQueue {
+	T *buffer;
+	u32 capacity;
+	volatile u32 head;
+	volatile u32 tail;
+	volatile u32 headLock;
+	volatile u32 tailLock;
+};
+
+template <typename Allocator, typename T>
+void MTQueueInit(MTQueue<T> *queue, u32 capacity) {
+	*queue = {
+		.buffer = (T *)Allocator::Alloc(sizeof(T) * capacity, alignof(T)),
+		.capacity = capacity,
+		.head = 0,
+		.tail = 0,
+		.headLock = 0,
+		.tailLock = 0 };
+}
+
+template <typename T>
+bool MTQueueEnqueue(MTQueue<T> *queue, T item)
+{
+	SpinlockLock(&queue->tailLock);
+	u32 tail = queue->tail;
+	u32 newTail = (tail + 1) % queue->capacity;
+	if (newTail == queue->head) {
+		// Full
+		SpinlockUnlock(&queue->tailLock);
+		return false;
+	}
+	else {
+		queue->buffer[tail] = item;
+		queue->tail = newTail;
+		SpinlockUnlock(&queue->tailLock);
+		return true;
+	}
+}
+
+template <typename T>
+bool MTQueueDequeue(MTQueue<T> *queue, T *item)
+{
+	bool result = false;
+	SpinlockLock(&queue->headLock);
+	u32 head = queue->head;
+	u32 tail = queue->tail;
+	if (head != tail) {
+		queue->head = (head + 1) % queue->capacity;
+		*item = queue->buffer[head];
+#if DEBUG_BUILD
+		memset(&queue->buffer[head], 0xFE, sizeof(T));
+#endif
+		result = true;
+	}
+	SpinlockUnlock(&queue->headLock);
+	return result;
+}
+
+template <typename T>
+bool MTQueueIsEmpty(MTQueue<T> *queue) {
+	SpinlockLock(&queue->headLock);
+	SpinlockLock(&queue->tailLock);
+	u32 head = queue->head;
+	u32 tail = queue->tail;
+	SpinlockUnlock(&queue->tailLock);
+	SpinlockUnlock(&queue->headLock);
+	return head == tail;
+}

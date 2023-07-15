@@ -17,25 +17,38 @@ void MemoryInit(Memory *memory)
 }
 
 // FRAME
-void *FrameAlloc(u64 size)
+void *FrameAllocator::Alloc(u64 size, int alignment)
 {
 	ASSERT((u8 *)g_memory->framePtr + size < (u8 *)g_memory->frameMem + Memory::frameSize); // Out of memory!
-	void *result;
 
-	result = g_memory->framePtr;
-	g_memory->framePtr = (u8 *)g_memory->framePtr + size;
+	u8 *result;
+
+	result = (u8 *)g_memory->framePtr;
+
+#if ENABLE_ALIGNMENT
+	// Alignment
+	ASSERT(IsPowerOf2(alignment));
+	int alignmentMask = alignment - 1;
+
+	u64 shift = 0;
+	if (result & alignmentMask) shift = alignment;
+	result += shift;
+	result &= ~alignmentMask;
+#endif
+
+	g_memory->framePtr = result + size;
 
 	return result;
 }
-void *FrameRealloc(void *ptr, u64 newSize)
+void *FrameAllocator::Realloc(void *ptr, u64 oldSize, u64 newSize, int alignment)
 {
 	//Log("WARNING: FRAME REALLOC\n");
 
-	void *newBlock = FrameAlloc(newSize);
-	memcpy(newBlock, ptr, newSize);
+	void *newBlock = Alloc(newSize, alignment);
+	memcpy(newBlock, ptr, oldSize);
 	return newBlock;
 }
-void FrameFree(void *ptr)
+void FrameAllocator::Free(void *ptr)
 {
 	(void) ptr;
 }
@@ -46,38 +59,64 @@ void FrameWipe()
 }
 
 // STACK
-void *StackAlloc(u64 size)
+void *StackAllocator::Alloc(u64 size, int alignment)
 {
 	ASSERT((u8 *)g_memory->stackPtr + size < (u8 *)g_memory->stackMem + Memory::stackSize); // Out of memory!
-	void *result;
 
-	result = g_memory->stackPtr;
-	g_memory->stackPtr = (u8 *)g_memory->stackPtr + size;
+	u8 *result;
+
+	result = (u8 *)g_memory->stackPtr;
+
+#if ENABLE_ALIGNMENT
+	// Alignment
+	ASSERT(IsPowerOf2(alignment));
+	int alignmentMask = alignment - 1;
+
+	u64 shift = 0;
+	if (result & alignmentMask) shift = alignment;
+	result += shift;
+	result &= ~alignmentMask;
+#endif
+
+	g_memory->stackPtr = result + size;
 
 	return result;
 }
-void *StackRealloc(void *ptr, u64 newSize)
+void *StackAllocator::Realloc(void *ptr, u64 oldSize, u64 newSize, int alignment)
 {
 	//ASSERT(false);
 	//Log("WARNING: STACK REALLOC\n");
 
-	void *newBlock = StackAlloc(newSize);
-	memcpy(newBlock, ptr, newSize);
+	void *newBlock = Alloc(newSize, alignment);
+	memcpy(newBlock, ptr, oldSize);
 	return newBlock;
 }
-void StackFree(void *ptr)
+void StackAllocator::Free(void *ptr)
 {
 	g_memory->stackPtr = ptr;
 }
 
 // TRANSIENT
-void *TransientAlloc(u64 size)
+void *TransientAllocator::Alloc(u64 size, int alignment)
 {
 	ASSERT((u8 *)g_memory->transientPtr + size < (u8 *)g_memory->transientMem + Memory::transientSize); // Out of memory!
-	void *result;
 
-	result = g_memory->transientPtr;
-	g_memory->transientPtr = (u8 *)g_memory->transientPtr + size;
+	u8 *result;
+
+	result = (u8 *)g_memory->transientPtr;
+
+#if ENABLE_ALIGNMENT
+	// Alignment
+	ASSERT(IsPowerOf2(alignment));
+	int alignmentMask = alignment - 1;
+
+	u64 shift = 0;
+	if (result & alignmentMask) shift = alignment;
+	result += shift;
+	result &= ~alignmentMask;
+#endif
+
+	g_memory->transientPtr = result + size;
 
 	return result;
 }
@@ -124,7 +163,7 @@ void *BuddyFindFreeBlockOfOrder(u8 desiredOrder, u8 **bookkeep)
 	return block;
 }
 
-void *BuddyAlloc(u64 size)
+void *BuddyAllocator::Alloc(u64 size, int alignment)
 {
 	u64 s = NextPowerOf264(size);
 	u8 desiredOrder = Ntz64(s / Memory::buddySmallest); // @Speed: left shift instead of divide
@@ -194,7 +233,7 @@ u64 BuddyTryMerge(u64 blockIdx)
 	return blockIdx;
 }
 
-void BuddyFree(void *ptr)
+void BuddyAllocator::Free(void *ptr)
 {
 	// Stupid ImGui
 	if (ptr == nullptr)

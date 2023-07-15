@@ -21,9 +21,16 @@ const f64 PI_64 = 3.1415926535897932384626433832795;
 const f64 HALFPI_64 = 1.5707963267948966192313216916398;
 const f64 PI2_64 = 6.283185307179586476925286766559;
 
-inline u8 Nlz(u32 x)
+#if IS_MSVC
+// Retarded compiler
+#define INTRINSIC inline
+#else
+#define INTRINSIC constexpr
+#endif
+
+INTRINSIC u8 Nlz(u32 x)
 {
-#if TARGET_WINDOWS
+#if IS_MSVC
 	unsigned long i;
 	if (_BitScanReverse(&i, x))
 		return 31 - (u8)i;
@@ -42,7 +49,7 @@ inline u8 Nlz(u32 x)
 #endif
 }
 
-inline u8 Ntz(u32 n)
+INTRINSIC u8 Ntz(u32 n)
 {
 #if TARGET_WINDOWS
 	unsigned long i;
@@ -54,17 +61,17 @@ inline u8 Ntz(u32 n)
 #endif
 }
 
-inline u32 NextPowerOf2(u32 n)
+INTRINSIC u32 NextPowerOf2(u32 n)
 {
 	return 0x80000000 >> (Nlz(n - 1) - 1);
 }
 
-inline u32 LastPowerOf2(u32 n)
+INTRINSIC u32 LastPowerOf2(u32 n)
 {
 	return 0x80000000 >> Nlz(n);
 }
 
-inline u8 Nlz64(u64 x)
+INTRINSIC u8 Nlz64(u64 x)
 {
 #if TARGET_WINDOWS
 	unsigned long i;
@@ -86,7 +93,7 @@ inline u8 Nlz64(u64 x)
 #endif
 }
 
-inline u8 Ntz64(u64 n)
+INTRINSIC u8 Ntz64(u64 n)
 {
 #if TARGET_WINDOWS
 	unsigned long i;
@@ -98,14 +105,32 @@ inline u8 Ntz64(u64 n)
 #endif
 }
 
-inline u64 NextPowerOf264(u64 n)
+INTRINSIC u64 NextPowerOf264(u64 n)
 {
 	return 0x8000000000000000 >> (Nlz64(n - 1) - 1);
 }
 
-inline u64 LastPowerOf264(u64 n)
+INTRINSIC u64 LastPowerOf264(u64 n)
 {
 	return 0x8000000000000000 >> Nlz64(n);
+}
+
+INTRINSIC u32 CountOnes(u32 n)
+{
+#if IS_MSVC
+	return __popcnt(n);
+#else
+	return __builtin_popcount(n);
+#endif
+}
+
+INTRINSIC u64 CountOnes64(u64 n)
+{
+#if IS_MSVC
+	return __popcnt64(n);
+#else
+	return __builtin_popcountll(n);
+#endif
 }
 
 inline bool EqualWithEpsilon(f32 a, f32 b, f32 epsilon)
@@ -141,6 +166,14 @@ inline f32 Ceil(f32 n)
 #define Min(a, b) ((a) > (b) ? (b) : (a))
 
 #define Max(a, b) ((a) > (b) ? (a) : (b))
+
+template <typename T>
+inline T Clamp(T in, T min, T max)
+{
+	if (in < min) in = min;
+	if (in > max) in = max;
+	return in;
+}
 
 inline f32 Fmod(f32 n, f32 d)
 {
@@ -826,6 +859,7 @@ inline v4 QuaternionFromAxisAngle(const v3 &axis, f32 angle)
 	return v4{ axis.x * s, axis.y * s, axis.z * s, c };
 }
 
+// Rotates vector v by quaternion q
 inline v3 QuaternionRotateVector(const v4 &q, const v3 &v)
 {
 	const v3 vectorPart = { q.x, q.y, q.z };

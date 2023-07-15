@@ -52,25 +52,43 @@ Collider *GetEntityCollider(GameState *gameState, EntityHandle handle)
 	return &gameState->colliders[idx];
 }
 
+RigidBody *GetEntityRigidBody(GameState *gameState, EntityHandle handle)
+{
+	if (!IsEntityHandleValid(gameState, handle))
+		return nullptr;
+
+	u32 idx = gameState->entityRigidBodies[handle.id];
+	if (idx == ENTITY_ID_INVALID)
+		return nullptr;
+	return &gameState->rigidBodies[idx];
+}
+
 void EntityAssignMesh(GameState *gameState, EntityHandle entityHandle,
 		MeshInstance *meshInstance)
 {
 	meshInstance->entityHandle = entityHandle;
-	u32 idx = (u32)ArrayPointerToIndex_MeshInstance(&gameState->meshInstances, meshInstance);
+	u32 idx = (u32)ArrayPointerToIndex(&gameState->meshInstances, meshInstance);
 	gameState->entityMeshes[entityHandle.id] = idx;
 }
 
 void EntityAssignCollider(GameState *gameState, EntityHandle entityHandle, Collider *collider)
 {
 	collider->entityHandle = entityHandle;
-	u32 idx = (u32)ArrayPointerToIndex_Collider(&gameState->colliders, collider);
+	u32 idx = (u32)ArrayPointerToIndex(&gameState->colliders, collider);
 	gameState->entityColliders[entityHandle.id] = idx;
+}
+
+void EntityAssignRigidBody(GameState *gameState, EntityHandle entityHandle, RigidBody *rigidBody)
+{
+	rigidBody->entityHandle = entityHandle;
+	u32 idx = (u32)ArrayPointerToIndex(&gameState->rigidBodies, rigidBody);
+	gameState->entityRigidBodies[entityHandle.id] = idx;
 }
 
 EntityHandle AddEntity(GameState *gameState, Transform **outTransform)
 {
-	u32 newTransformIdx = gameState->transforms.size;
-	Transform *newTransform = ArrayAdd_Transform(&gameState->transforms);
+	u32 newTransformIdx = gameState->transforms.count;
+	Transform *newTransform = ArrayAdd(&gameState->transforms);
 	*newTransform = {};
 
 	EntityHandle newHandle = ENTITY_HANDLE_INVALID;
@@ -115,7 +133,7 @@ void RemoveEntity(GameState *gameState, EntityHandle handle)
 
 	// Remove 'components'
 	{
-		u32 last = gameState->transforms.size - 1;
+		u32 last = gameState->transforms.count - 1;
 		Transform *lastPtr = &gameState->transforms[last];
 		// Retarget moved component's entity to the new pointer.
 		EntityHandle handleOfLast = EntityHandleFromTransformIndex(gameState, last); // @Improve
@@ -123,32 +141,45 @@ void RemoveEntity(GameState *gameState, EntityHandle handle)
 		*transformPtr = *lastPtr;
 
 		gameState->entityTransforms[handle.id] = ENTITY_ID_INVALID;
-		--gameState->transforms.size;
+		--gameState->transforms.count;
 	}
 
 	MeshInstance *meshInstance = GetEntityMesh(gameState, handle);
 	if (meshInstance)
 	{
-		MeshInstance *last = &gameState->meshInstances[gameState->meshInstances.size - 1];
+		MeshInstance *last = &gameState->meshInstances[gameState->meshInstances.count - 1];
 		// Retarget moved component's entity to the new pointer.
-		u32 idx = (u32)ArrayPointerToIndex_MeshInstance(&gameState->meshInstances, meshInstance);
+		u32 idx = (u32)ArrayPointerToIndex(&gameState->meshInstances, meshInstance);
 		gameState->entityMeshes[last->entityHandle.id] = idx;
 		*meshInstance = *last;
 
-		--gameState->meshInstances.size;
+		--gameState->meshInstances.count;
 		gameState->entityMeshes[handle.id] = ENTITY_ID_INVALID;
 	}
 
 	Collider *collider = GetEntityCollider(gameState, handle);
 	if (collider)
 	{
-		Collider *last = &gameState->colliders[gameState->colliders.size - 1];
+		Collider *last = &gameState->colliders[gameState->colliders.count - 1];
 		// Retarget moved component's entity to the new pointer.
-		u32 idx = (u32)ArrayPointerToIndex_Collider(&gameState->colliders, collider);
+		u32 idx = (u32)ArrayPointerToIndex(&gameState->colliders, collider);
 		gameState->entityColliders[last->entityHandle.id] = idx;
 		*collider = *last;
 
-		--gameState->colliders.size;
+		--gameState->colliders.count;
 		gameState->entityColliders[handle.id] = ENTITY_ID_INVALID;
+	}
+
+	RigidBody *rigidBody = GetEntityRigidBody(gameState, handle);
+	if (collider)
+	{
+		RigidBody *last = &gameState->rigidBodies[gameState->colliders.count - 1];
+		// Retarget moved component's entity to the new pointer.
+		u32 idx = (u32)ArrayPointerToIndex(&gameState->rigidBodies, collider);
+		gameState->entityRigidBodies[last->entityHandle.id] = idx;
+		*rigidBody = *last;
+
+		--gameState->rigidBodies.count;
+		gameState->entityRigidBodies[handle.id] = ENTITY_ID_INVALID;
 	}
 }

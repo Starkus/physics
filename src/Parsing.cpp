@@ -27,7 +27,6 @@ struct Token
 	const char *file;
 	s64 line;
 };
-DECLARE_DYNAMIC_ARRAY(Token);
 
 int EatWhitespace(Tokenizer *tokenizer)
 {
@@ -232,9 +231,12 @@ inline bool TokenIsEqual(Token *a, Token *b)
 	return true;
 }
 
-void TokenizeFile(const char *fileBuffer, u64 fileSize, DynamicArray_Token &tokens,
+DynamicArray<Token, FrameAllocator> TokenizeFile(const char *fileBuffer, u64 fileSize,
 		const char *filename = nullptr)
 {
+	DynamicArray<Token, FrameAllocator> tokens;
+	DynamicArrayInit(&tokens, 128);
+
 	// @Fix: allocating functions in this procedure! We don't really know how to expand the tokens
 	// array.
 
@@ -278,11 +280,12 @@ void TokenizeFile(const char *fileBuffer, u64 fileSize, DynamicArray_Token &toke
 		{
 			newToken.file = currentFile;
 			newToken.line += currentLineOffset;
-			*DynamicArrayAdd_Token(&tokens, realloc) = newToken;
+			*DynamicArrayAdd(&tokens) = newToken;
 		}
 
 		if (newToken.type == TOKEN_END_OF_FILE)
 			break;
 	}
+	return tokens;
 }
 

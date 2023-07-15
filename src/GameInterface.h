@@ -17,6 +17,7 @@ struct Controller
 			Button left;
 			Button right;
 			Button jump;
+			Button crouch;
 			Button camUp;
 			Button camDown;
 			Button camLeft;

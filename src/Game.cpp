@@ -25,15 +25,12 @@
 
 #include "RandomTable.h"
 #include "StringStream.h"
-#include "Containers.h"
 #include "Entity.h"
 #include "Game.h"
 
 #if DEBUG_BUILD
 DebugContext *g_debugContext;
 #endif
-
-DECLARE_ARRAY(u32);
 
 #include "DebugDraw.cpp"
 #include "Collision.cpp"
@@ -98,23 +95,25 @@ bool GameResourcePostLoad(Resource *resource, u8 *fileBuffer, bool initialize)
 void StartGame()
 {
 	ASSERT(g_memory->transientMem == g_memory->transientPtr);
-	GameState *gameState = (GameState *)TransientAlloc(sizeof(GameState));
+	GameState *gameState = ALLOC(TransientAllocator, GameState);
 #if DEBUG_BUILD
-	g_debugContext = (DebugContext *)TransientAlloc(sizeof(DebugContext));
+	g_debugContext = ALLOC(TransientAllocator, DebugContext);
 	*g_debugContext = {};
 #endif
 
 	// Init game state
 	memset(gameState, 0, sizeof(GameState));
 	gameState->timeMultiplier = 1.0f;
-	ArrayInit_Transform(&gameState->transforms, 4096, TransientAlloc);
-	ArrayInit_MeshInstance(&gameState->meshInstances, 4096, TransientAlloc);
-	ArrayInit_Collider(&gameState->colliders, 4096, TransientAlloc);
+	ArrayInit(&gameState->transforms, 4096);
+	ArrayInit(&gameState->meshInstances, 4096);
+	ArrayInit(&gameState->colliders, 4096);
+	ArrayInit(&gameState->rigidBodies, 4096);
 
 	// @Hack: Hmmm
 	memset(gameState->entityTransforms, 0xFF, sizeof(gameState->entityTransforms));
 	memset(gameState->entityMeshes, 0xFF, sizeof(gameState->entityMeshes));
 	memset(gameState->entityColliders, 0xFF, sizeof(gameState->entityColliders));
+	memset(gameState->entityRigidBodies, 0xFF, sizeof(gameState->entityRigidBodies));
 
 	// Initialize
 	{
@@ -145,8 +144,8 @@ void StartGame()
 		{
 			int attribs = RENDERATTRIB_POSITION | RENDERATTRIB_COLOR3;
 			DebugGeometryBuffer *dgb = &g_debugContext->debugGeometryBuffer;
-			dgb->triangleData = (DebugVertex *)TransientAlloc(2048 * sizeof(DebugVertex));
-			dgb->lineData = (DebugVertex *)TransientAlloc(2048 * sizeof(DebugVertex));
+			dgb->triangleData = ALLOC_N(TransientAllocator, DebugVertex, 2048);
+			dgb->lineData = ALLOC_N(TransientAllocator, DebugVertex, 2048);
 			dgb->debugCubeCount = 0;
 			dgb->triangleVertexCount = 0;
 			dgb->lineVertexCount = 0;
@@ -159,7 +158,7 @@ void StartGame()
 			u8 *fileBuffer;
 			u64 fileSize;
 			bool success = PlatformReadEntireFile("data/cube.b", &fileBuffer,
-					&fileSize, FrameAlloc);
+					&fileSize, FrameAllocator::Alloc);
 			ASSERT(success);
 
 			Vertex *vertexData;
@@ -170,7 +169,7 @@ void StartGame()
 			ReadMesh(fileBuffer, &vertexData, &indexData, &vertexCount, &indexCount, &materialName);
 
 			// Keep only positions
-			v3 *positionBuffer = (v3 *)FrameAlloc(sizeof(v3) * vertexCount);
+			v3 *positionBuffer = ALLOC_N(FrameAllocator, v3, vertexCount);
 			for (u32 i = 0; i < vertexCount; ++i)
 			{
 				positionBuffer[i] = vertexData[i].pos;
@@ -245,40 +244,40 @@ void StartGame()
 		EntityHandle testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -6.0f, 3.0f, 1.0f };
 		transform->rotation = QUATERNION_IDENTITY;
-		MeshInstance *meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		MeshInstance *meshInstance = ArrayAdd(&gameState->meshInstances);
 		*meshInstance = anvilMesh;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		Collider *collider = ArrayAdd_Collider(&gameState->colliders);
+		Collider *collider = ArrayAdd(&gameState->colliders);
 		*collider = anvilCollider;
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 5.0f, 4.0f, 1.0f };
 		transform->rotation = QUATERNION_IDENTITY;
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		*meshInstance = anvilMesh;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		*collider = anvilCollider;
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 3.0f, -4.0f, 1.0f };
 		transform->rotation = QuaternionFromEulerZYX(v3{ 0, 0, HALFPI * -0.5f });
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		*meshInstance = anvilMesh;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		*collider = anvilCollider;
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -8.0f, -4.0f, 1.0f };
 		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI * 0.5f, 0, 0 });
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		*meshInstance = teapotMesh;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		*collider = teapotCollider;
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
@@ -286,10 +285,10 @@ void StartGame()
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -3.0f, 5.0f, 1.0f };
 		transform->rotation = QUATERNION_IDENTITY;
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = cubeRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		collider->type = COLLIDER_CUBE;
 		collider->cube.radius = 1;
 		collider->cube.offset = {};
@@ -298,10 +297,10 @@ void StartGame()
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 0.0f, 5.0f, 1.0f };
 		transform->rotation = QuaternionFromEulerZYX(v3{ 0, HALFPI, 0 });
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = cubeRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		collider->type = COLLIDER_CUBE;
 		collider->cube.radius = 1;
 		collider->cube.offset = {};
@@ -310,23 +309,50 @@ void StartGame()
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 3.0f, 5.0f, 1.0f };
 		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI, 0, 0 });
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = cubeRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		collider->type = COLLIDER_CUBE;
 		collider->cube.radius = 1;
 		collider->cube.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
+		testEntityHandle = AddEntity(gameState, &transform);
+		transform->translation = { 0.0f, 0.0f, -20.0f };
+		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI, 0, 0 });
+		meshInstance = ArrayAdd(&gameState->meshInstances);
+		meshInstance->meshRes = cubeRes;
+		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
+		collider = ArrayAdd(&gameState->colliders);
+		collider->type = COLLIDER_CUBE;
+		collider->cube.radius = 20;
+		collider->cube.offset = {};
+		EntityAssignCollider(gameState, testEntityHandle, collider);
+
+		testEntityHandle = AddEntity(gameState, &transform);
+		transform->translation = { 3.0f, 5.0f, 4.0f };
+		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI, 0, 0 });
+		meshInstance = ArrayAdd(&gameState->meshInstances);
+		meshInstance->meshRes = cubeRes;
+		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
+		collider = ArrayAdd(&gameState->colliders);
+		collider->type = COLLIDER_CUBE;
+		collider->cube.radius = 1;
+		collider->cube.offset = {};
+		EntityAssignCollider(gameState, testEntityHandle, collider);
+		RigidBody *rigidBody = ArrayAdd(&gameState->rigidBodies);
+		*rigidBody = {};
+		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
+
 		const Resource *sphereRes = GetResource("sphere.b");
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -6.0f, 7.0f, 1.0f };
 		transform->rotation = QUATERNION_IDENTITY;
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = sphereRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		collider->type = COLLIDER_SPHERE;
 		collider->sphere.radius = 1;
 		collider->sphere.offset = {};
@@ -336,29 +362,56 @@ void StartGame()
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -3.0f, 7.0f, 1.0f };
 		transform->rotation = QUATERNION_IDENTITY;
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = cylinderRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		collider->type = COLLIDER_CYLINDER;
 		collider->cylinder.radius = 1;
 		collider->cylinder.height = 2;
 		collider->cylinder.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
+		testEntityHandle = AddEntity(gameState, &transform);
+		transform->translation = { -3.0f, 5.0f, 4.0f };
+		transform->rotation = QUATERNION_IDENTITY;
+		meshInstance = ArrayAdd(&gameState->meshInstances);
+		meshInstance->meshRes = cylinderRes;
+		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
+		collider = ArrayAdd(&gameState->colliders);
+		collider->type = COLLIDER_CYLINDER;
+		collider->cylinder.radius = 1;
+		collider->cylinder.height = 2;
+		collider->cylinder.offset = {};
+		EntityAssignCollider(gameState, testEntityHandle, collider);
+		rigidBody = ArrayAdd(&gameState->rigidBodies);
+		*rigidBody = {};
+		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
+
 		const Resource *capsuleRes = GetResource("capsule.b");
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 0.0f, 7.0f, 2.0f };
 		transform->rotation = QUATERNION_IDENTITY;
-		meshInstance = ArrayAdd_MeshInstance(&gameState->meshInstances);
+		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = capsuleRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd_Collider(&gameState->colliders);
+		collider = ArrayAdd(&gameState->colliders);
 		collider->type = COLLIDER_CAPSULE;
 		collider->capsule.radius = 1;
 		collider->capsule.height = 2;
 		collider->capsule.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
+
+		const Resource *arrowRes = GetResource("editor_arrow.b");
+		for (int i = 0; i < ArrayCount(g_debugContext->debugArrows); ++i)
+		{
+			g_debugContext->debugArrows[i] = AddEntity(gameState, &transform);
+			transform->translation = {};
+			transform->rotation = QUATERNION_IDENTITY;
+			meshInstance = ArrayAdd(&gameState->meshInstances);
+			meshInstance->meshRes = arrowRes;
+			EntityAssignMesh(gameState, g_debugContext->debugArrows[i], meshInstance);
+		}
 	}
 
 	// Init light
@@ -410,7 +463,7 @@ DeviceProgram BindMaterial(GameState *gameState, const Resource *materialRes, co
 void Render(GameState *gameState, f32 deltaTime)
 {
 	// Meshes
-	for (u32 meshInstanceIdx = 0; meshInstanceIdx < gameState->meshInstances.size;
+	for (u32 meshInstanceIdx = 0; meshInstanceIdx < gameState->meshInstances.count;
 			++meshInstanceIdx)
 	{
 		MeshInstance *meshInstance = &gameState->meshInstances[meshInstanceIdx];
@@ -465,7 +518,10 @@ void Render(GameState *gameState, f32 deltaTime)
 		if (g_debugContext->wireframeDebugDraws)
 			SetFillMode(RENDER_LINE);
 
-		DisableDepthTest();
+		SetBackfaceCullingEnabled(false);
+
+		//DisableDepthTest();
+		ClearDepthBuffer();
 
 		UseProgram(g_debugContext->debugDrawProgram);
 		DeviceUniform viewUniform = GetUniform(g_debugContext->debugDrawProgram, "view");
@@ -507,7 +563,8 @@ void Render(GameState *gameState, f32 deltaTime)
 		dgb->triangleVertexCount = 0;
 		dgb->lineVertexCount = 0;
 
-		EnableDepthTest();
+		//EnableDepthTest();
+		SetBackfaceCullingEnabled(true);
 		SetFillMode(RENDER_FILL);
 	}
 #endif
@@ -567,16 +624,37 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 		deltaTime = 1 / 60.0f;
 	}
 
+	f32 mass = 1.0f;
+	f32 restitution = 0.0f;
+	// @Hardcoded: moment of inertia of 1m^3, 1kg cube
+	f32 s = (mass/12.0f) * (4.0f*4.0f);
+	f32 invs = 1.0f/s;
+	mat4 invMomentOfInertia =
+	{
+		invs,	0,		0,		0,
+		0,		invs,	0,		0,
+		0,		0,		invs,	0,
+		0,		0,		0,		0
+	};
+	mat4 momentOfInertia =
+	{
+		s,	0,	0,	0,
+		0,	s,	0,	0,
+		0,	0,	s,	0,
+		0,	0,	0,	0
+	};
+
 	// Update
 	{
 		// Collision
-		for (u32 colliderAIdx = 0; colliderAIdx < gameState->colliders.size; ++colliderAIdx)
+		for (u32 colliderAIdx = 0; colliderAIdx < gameState->colliders.count; ++colliderAIdx)
 		{
 			Collider *colliderA = &gameState->colliders[colliderAIdx];
 			Transform *transformA = GetEntityTransform(gameState, colliderA->entityHandle);
 			ASSERT(transformA); // There should never be an orphaned collider.
+			RigidBody *rigidBody = GetEntityRigidBody(gameState, colliderA->entityHandle);
 
-			for (u32 colliderBIdx = 0; colliderBIdx < gameState->colliders.size; ++colliderBIdx)
+			for (u32 colliderBIdx = 0; colliderBIdx < gameState->colliders.count; ++colliderBIdx)
 			{
 				if (colliderAIdx == colliderBIdx)
 					continue;
@@ -585,20 +663,104 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				Transform *transformB = GetEntityTransform(gameState, colliderB->entityHandle);
 				ASSERT(transformB); // There should never be an orphaned collider.
 
-				GJKResult gjkResult = GJKTest(transformB, transformA, colliderB, colliderA);
-				if (gjkResult.hit)
+				// @Improve: better collision against multiple colliders?
+				CollisionInfo collisionInfo = TestCollision(transformA, transformB, colliderA,
+						colliderB);
+				if (collisionInfo.hit)
 				{
-					// @Improve: better collision against multiple colliders?
-					v3 depenetration = ComputeDepenetration(gjkResult, transformB, transformA,
-							colliderB, colliderA);
-					if (!g_debugContext->disableDepenetration)
+#if DEBUG_BUILD
+					if (g_debugContext->pausePhysicsOnContact)
+						g_debugContext->pausePhysics = true;
+#endif
+
+					if (rigidBody)
 					{
-						depenetration /= 2;
-						transformA->translation -= depenetration;
-						transformB->translation += depenetration;
+						v3 collisionNormal = V3Normalize(collisionInfo.depenetrationVector);
+						v3 localHitPoint = collisionInfo.hitPoint - transformA->translation;
+
+						Transform *debugArrow =
+							GetEntityTransform(gameState, g_debugContext->debugArrows[0]);
+
+						v3 angVelAtHitPoint = V3Cross(rigidBody->angularVelocity, localHitPoint);
+						v3 velAtHitPoint = rigidBody->velocity + angVelAtHitPoint;
+
+						v3 armCrossNormal = V3Cross(localHitPoint, collisionNormal);
+
+						mat4 R = Mat4FromQuaternion(transformA->rotation);
+						mat4 noR = Mat4Transpose(R);
+						mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, invMomentOfInertia), noR);
+
+						f32 speedAlongHitNormal = V3Dot(velAtHitPoint, collisionNormal);
+						speedAlongHitNormal = Min(0, speedAlongHitNormal);
+
+						f32 impulseScalar = -(1.0f + restitution) * speedAlongHitNormal;
+						impulseScalar /= (1.0f/mass) +
+							V3Dot(V3Cross(Mat4TransformDirection(worldInvMomentOfInertia,
+								armCrossNormal), localHitPoint), collisionNormal);
+
+						v3 impulseVector = collisionNormal * impulseScalar;
+						v3 force = impulseVector / deltaTime;
+
+						rigidBody->totalForce += force;
+
+						v3 torque = V3Cross(localHitPoint, impulseVector) / deltaTime;
+						rigidBody->totalTorque += torque;
 					}
+
+					if (rigidBody && !g_debugContext->disableDepenetration)
+						transformA->translation += collisionInfo.depenetrationVector;
 				}
 			}
+		}
+
+		// Rigid bodies
+		if (!g_debugContext->pausePhysics)
+		{
+			for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
+			{
+				RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
+				Transform *transform = GetEntityTransform(gameState, rigidBody->entityHandle);
+				ASSERT(transform); // There should never be an orphaned rigid body.
+
+				mat4 R = Mat4FromQuaternion(transform->rotation);
+				mat4 noR = Mat4Transpose(R);
+				mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, invMomentOfInertia), noR);
+
+				rigidBody->velocity += rigidBody->totalForce / mass * deltaTime;
+				transform->translation += rigidBody->velocity * deltaTime;
+
+				v3 angularAcceleration = Mat4TransformDirection(worldInvMomentOfInertia,
+						rigidBody->totalTorque);
+				rigidBody->angularVelocity += angularAcceleration * deltaTime;
+				v3 deltaRot = rigidBody->angularVelocity * deltaTime;
+				if (deltaRot.x || deltaRot.y || deltaRot.z)
+				{
+					f32 angle = V3Length(deltaRot);
+					transform->rotation = QuaternionMultiply(
+							QuaternionFromAxisAngle(deltaRot / angle, angle),
+							transform->rotation);
+					transform->rotation = V4Normalize(transform->rotation);
+				}
+
+				rigidBody->totalForce = { 0, 0, -9.8f };
+				rigidBody->totalTorque = { 0, 0, 0 };
+
+				f32 drag = 0.1f;
+				f32 angularDrag = 0.1f;
+				rigidBody->velocity -= rigidBody->velocity * deltaTime * drag;
+				rigidBody->angularVelocity -= rigidBody->angularVelocity * deltaTime * angularDrag;
+			}
+		}
+		if (g_debugContext->resetMomenta)
+		{
+			for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
+			{
+				RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
+
+				rigidBody->velocity = {};
+				rigidBody->angularVelocity = {};
+			}
+			g_debugContext->resetMomenta = false;
 		}
 
 		// Move camera
@@ -634,6 +796,15 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			{
 				gameState->camPos -= camRight * 8.0f * deltaTime;
 			}
+
+			if (controller->jump.endedDown)
+			{
+				gameState->camPos += { 0, 0, 8.0f * deltaTime };
+			}
+			else if (controller->crouch.endedDown)
+			{
+				gameState->camPos -= { 0, 0, 8.0f * deltaTime };
+			}
 		}
 
 		// Mouse picking
@@ -652,7 +823,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			v3 dir = cursorXYZ - origin;
 			g_debugContext->hoveredEntity = ENTITY_HANDLE_INVALID;
 			f32 closestDistance = INFINITY;
-			for (u32 colliderIdx = 0; colliderIdx < gameState->colliders.size; ++colliderIdx)
+			for (u32 colliderIdx = 0; colliderIdx < gameState->colliders.count; ++colliderIdx)
 			{
 				Collider *collider = &gameState->colliders[colliderIdx];
 				Transform *transform = GetEntityTransform(gameState, collider->entityHandle);
@@ -873,9 +1044,9 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 		if (g_debugContext->drawGJKPolytope)
 		{
 			DebugVertex *gjkVertices;
-			u32 gjkFaceCount;
-			GetGJKStepGeometry(g_debugContext->gjkDrawStep, &gjkVertices, &gjkFaceCount);
-			DrawDebugTriangles(gjkVertices, gjkFaceCount);
+			u32 gjkVertexCount;
+			GetGJKStepGeometry(g_debugContext->gjkDrawStep, &gjkVertices, &gjkVertexCount);
+			DrawDebugTriangles(gjkVertices, gjkVertexCount);
 
 			DrawDebugCubeAA(g_debugContext->GJKNewPoint[g_debugContext->gjkDrawStep], 0.03f);
 
@@ -884,12 +1055,15 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 
 		if (g_debugContext->drawEPAPolytope)
 		{
-			DebugVertex *epaVertices;
-			u32 epaFaceCount;
-			GetEPAStepGeometry(g_debugContext->polytopeDrawStep, &epaVertices, &epaFaceCount);
-			DrawDebugTriangles(epaVertices, epaFaceCount * 3);
+			int stepToDraw = Clamp(g_debugContext->polytopeDrawStep, 0,
+					g_debugContext->epaStepCount - 1);
 
-			DrawDebugCubeAA(g_debugContext->epaNewPoint[g_debugContext->polytopeDrawStep], 0.03f);
+			DebugVertex *epaVertices;
+			u32 epaVertexCount;
+			GetEPAStepGeometry(stepToDraw, &epaVertices, &epaVertexCount);
+			DrawDebugTriangles(epaVertices, epaVertexCount);
+
+			DrawDebugCubeAA(g_debugContext->epaNewPoint[stepToDraw], 0.03f);
 
 			DrawDebugCubeAA({}, 0.04f, {1,0,1});
 		}

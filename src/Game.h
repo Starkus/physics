@@ -72,23 +72,30 @@ struct DebugContext
 	int gjkDrawStep;
 	int gjkStepCount;
 	DebugVertex *GJKSteps[64];
-	int GJKStepCounts[64];
+	int GJKStepsVertexCounts[64];
 	v3 GJKNewPoint[64];
 
 	static const int epaMaxSteps = 32;
 	bool drawEPAPolytope;
+	bool drawEPAClosestFeature;
 	bool freezePolytopeGeom;
 	int polytopeDrawStep;
 	int epaStepCount;
 	DebugVertex *polytopeSteps[epaMaxSteps];
-	int polytopeStepCounts[epaMaxSteps];
+	int polytopeStepsVertexCounts[epaMaxSteps];
 	v3 epaNewPoint[epaMaxSteps];
+
+	bool pausePhysics;
+	bool pausePhysicsOnContact;
+	bool resetMomenta;
 
 	// Editor
 	EntityHandle selectedEntity = ENTITY_HANDLE_INVALID;
 	EntityHandle hoveredEntity;
 	EditMode currentEditMode;
 	bool editRelative;
+
+	EntityHandle debugArrows[4];
 
 	DeviceProgram editorSelectedProgram;
 	DeviceProgram editorGizmoProgram;
@@ -110,12 +117,14 @@ struct GameState
 	u32 entitySkinnedMeshes[MAX_ENTITIES];
 	u32 entityParticleSystems[MAX_ENTITIES];
 	u32 entityColliders[MAX_ENTITIES];
+	u32 entityRigidBodies[MAX_ENTITIES];
 
 	LevelGeometry levelGeometry;
 
-	Array_Transform transforms;
-	Array_MeshInstance meshInstances;
-	Array_Collider colliders;
+	Array<Transform, TransientAllocator> transforms;
+	Array<MeshInstance, TransientAllocator> meshInstances;
+	Array<Collider, TransientAllocator> colliders;
+	Array<RigidBody, TransientAllocator> rigidBodies;
 
 	v3 lightPosition;
 	v3 lightDirection;

@@ -1,5 +1,14 @@
 #include "BakeryInterop.h"
 
+template <typename T, typename Allocator>
+inline T* AllocAndCopy(u64 count, const u8 *fileBuffer, u64 offset)
+{
+	const u64 blobSize = sizeof(T) * count;
+	void *mem = Allocator::Alloc(blobSize, alignof(T));
+	memcpy(mem, fileBuffer + offset, blobSize);
+	return (T*)mem;
+}
+
 void ReadMesh(const u8 *fileBuffer, Vertex **vertexData, u16 **indexData, u32 *vertexCount,
 		u32 *indexCount, const char **materialFilename)
 {
@@ -34,17 +43,12 @@ void ReadSkinnedMesh(const u8 *fileBuffer, ResourceSkinnedMesh *skinnedMesh, Ski
 
 	u32 jointCount = header->jointCount;
 
-	const u64 bindPosesBlobSize = sizeof(Transform) * jointCount;
-	Transform *bindPoses = (Transform *)TransientAlloc(bindPosesBlobSize); // @Broken: Memory leak with resource reload!!!
-	memcpy(bindPoses, fileBuffer + header->bindPosesBlobOffset, bindPosesBlobSize);
+	// @Broken: Memory leak with resource reload!!!
+	Transform* bindPoses = AllocAndCopy<Transform, TransientAllocator>(jointCount, fileBuffer, header->bindPosesBlobOffset);
 
-	const u64 jointParentsBlobSize = jointCount;
-	u8 *jointParents = (u8 *)TransientAlloc(jointParentsBlobSize);
-	memcpy(jointParents, fileBuffer + header->jointParentsBlobOffset, jointParentsBlobSize);
+	u8* jointParents = AllocAndCopy<u8, TransientAllocator>(jointCount, fileBuffer, header->jointParentsBlobOffset);
 
-	const u64 restPosesBlobSize = sizeof(Transform) * jointCount;
-	Transform *restPoses = (Transform *)TransientAlloc(restPosesBlobSize);
-	memcpy(restPoses, fileBuffer + header->restPosesBlobOffset, restPosesBlobSize);
+	Transform* restPoses = AllocAndCopy<Transform, TransientAllocator>(jointCount, fileBuffer, header->restPosesBlobOffset);
 
 	ASSERT(jointCount < U8_MAX);
 	skinnedMesh->jointCount = (u8)jointCount;
@@ -56,7 +60,7 @@ void ReadSkinnedMesh(const u8 *fileBuffer, ResourceSkinnedMesh *skinnedMesh, Ski
 	skinnedMesh->animationCount = animationCount;
 
 	const u64 animationsBlobSize = sizeof(Animation) * animationCount;
-	skinnedMesh->animations = (Animation *)TransientAlloc(animationsBlobSize);
+	skinnedMesh->animations = (Animation *)TransientAllocator::Alloc(animationsBlobSize, alignof(u64));
 
 	BakerySkinnedMeshAnimationHeader *animationHeaders = (BakerySkinnedMeshAnimationHeader *)
 		(fileBuffer + header->animationBlobOffset);
@@ -69,15 +73,13 @@ void ReadSkinnedMesh(const u8 *fileBuffer, ResourceSkinnedMesh *skinnedMesh, Ski
 		u32 frameCount = animationHeader->frameCount;
 		u32 channelCount = animationHeader->channelCount;
 
-		const u64 timestampsBlobSize = sizeof(f32) * frameCount;
-		f32 *timestamps = (f32 *)TransientAlloc(timestampsBlobSize);
-		memcpy(timestamps, fileBuffer + animationHeader->timestampsBlobOffset, timestampsBlobSize);
+		f32 *timestamps = AllocAndCopy<f32, TransientAllocator>(frameCount, fileBuffer, animationHeader->timestampsBlobOffset);
 
 		animation->frameCount = frameCount;
 		animation->timestamps = timestamps;
 		animation->channelCount = channelCount;
 		animation->loop = animationHeader->loop;
-		animation->channels = (AnimationChannel *)TransientAlloc(sizeof(AnimationChannel) *channelCount);
+		animation->channels = ALLOC_N(TransientAllocator, AnimationChannel, channelCount);
 
 		BakerySkinnedMeshAnimationChannelHeader *channelHeaders =
 			(BakerySkinnedMeshAnimationChannelHeader *)(fileBuffer +
@@ -90,10 +92,7 @@ void ReadSkinnedMesh(const u8 *fileBuffer, ResourceSkinnedMesh *skinnedMesh, Ski
 
 			u32 jointIndex = channelHeader->jointIndex;
 
-			u64 transformsBlobSize = sizeof(Transform) * frameCount;
-			Transform *transforms = (Transform *)TransientAlloc(transformsBlobSize);
-			memcpy(transforms, fileBuffer + channelHeader->transformsBlobOffset,
-					transformsBlobSize);
+			Transform *transforms = AllocAndCopy<Transform, TransientAllocator>(frameCount, fileBuffer, channelHeader->transformsBlobOffset);
 
 			channel->jointIndex = jointIndex;
 			channel->transforms = transforms;
@@ -112,34 +111,26 @@ void ReadTriangleGeometry(const u8 *fileBuffer, ResourceGeometryGrid *geometryGr
 	geometryGrid->positionCount = header->positionCount;
 
 	u32 offsetCount = header->cellsSide * header->cellsSide + 1;
-	u64 offsetBlobSize = sizeof(u32) * offsetCount;
-	geometryGrid->offsets = (u32 *)TransientAlloc(offsetBlobSize);
-	memcpy(geometryGrid->offsets, fileBuffer + header->offsetsBlobOffset, offsetBlobSize);
+	geometryGrid->offsets = AllocAndCopy<u32, TransientAllocator>(offsetCount, fileBuffer, header->offsetsBlobOffset);
 
 	u32 positionCount = header->positionCount;
-	u64 positionsBlobSize = sizeof(v3) * positionCount;
-	geometryGrid->positions = (v3 *)TransientAlloc(positionsBlobSize);
-	memcpy(geometryGrid->positions, fileBuffer + header->positionsBlobOffset, positionsBlobSize);
+	geometryGrid->positions = AllocAndCopy<v3, TransientAllocator>(positionCount, fileBuffer, header->positionsBlobOffset);
 
 	u32 triangleCount = geometryGrid->offsets[offsetCount - 1];
-	u64 trianglesBlobSize = sizeof(Triangle) * triangleCount;
-	geometryGrid->triangles = (IndexTriangle *)TransientAlloc(trianglesBlobSize);
-	memcpy(geometryGrid->triangles, fileBuffer + header->trianglesBlobOffset, trianglesBlobSize);
+	geometryGrid->triangles = AllocAndCopy<IndexTriangle, TransientAllocator>(triangleCount, fileBuffer, header->trianglesBlobOffset);
 }
 
 void ReadCollisionMesh(const u8 *fileBuffer, ResourceCollisionMesh *collisionMesh)
 {
 	BakeryCollisionMeshHeader *header = (BakeryCollisionMeshHeader *)fileBuffer;
 
-	collisionMesh->positionCount = header->positionCount;
-	collisionMesh->positionData = (v3 *)TransientAlloc(sizeof(v3) * collisionMesh->positionCount);
-	memcpy(collisionMesh->positionData, fileBuffer + header->positionsBlobOffset, sizeof(v3) *
-			collisionMesh->positionCount);
+	u32 positionCount = header->positionCount;
+	collisionMesh->positionCount = positionCount;
+	collisionMesh->positionData = AllocAndCopy<v3, TransientAllocator>(positionCount, fileBuffer, header->positionsBlobOffset);
 
-	collisionMesh->triangleCount = header->triangleCount;
-	u64 trianglesBlobSize = sizeof(IndexTriangle) * collisionMesh->triangleCount;
-	collisionMesh->triangleData = (IndexTriangle *)TransientAlloc(trianglesBlobSize);
-	memcpy(collisionMesh->triangleData, fileBuffer + header->trianglesBlobOffset, trianglesBlobSize);
+	u32 triangleCount = header->triangleCount;
+	collisionMesh->triangleCount = triangleCount;
+	collisionMesh->triangleData = AllocAndCopy<IndexTriangle, TransientAllocator>(triangleCount, fileBuffer, header->trianglesBlobOffset);
 }
 
 void ReadImage(const u8 *fileBuffer, const u8 **imageData, u32 *width, u32 *height, u32 *components)

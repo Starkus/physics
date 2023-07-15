@@ -7,36 +7,54 @@
 #define VERBOSE_LOG(...)
 #endif
 
+struct GJKPoint
+{
+	v3 dif; // we store a-b instead of b since it's more useful.
+	v3 a;
+};
+
 struct GJKResult
 {
 	bool hit;
-	v3 points[4];
+	GJKPoint points[4];
 };
 
 struct EPAFace
 {
-	v3 a;
-	v3 b;
-	v3 c;
+	GJKPoint a;
+	GJKPoint b;
+	GJKPoint c;
 };
 
 struct EPAEdge
 {
-	v3 a;
-	v3 b;
+	GJKPoint a;
+	GJKPoint b;
+};
+
+struct CollisionInfo
+{
+	bool hit;
+	v3 hitPoint;
+	v3 depenetrationVector;
 };
 
 #if DEBUG_BUILD
-void GenPolytopeMesh(EPAFace *polytopeData, int faceCount, DebugVertex *buffer)
+void GenPolytopeMesh(EPAFace *polytopeData, int faceCount, DebugVertex *outputBuffer, int *vertexCount)
 {
+	*vertexCount = 0;
 	for (int faceIdx = 0; faceIdx < faceCount; ++faceIdx)
 	{
 		EPAFace *face = &polytopeData[faceIdx];
-		v3 normal = V3Normalize(V3Cross(face->c - face->a, face->b - face->a));
+		v3 normal = V3Normalize(V3Cross(face->c.dif - face->a.dif, face->b.dif - face->a.dif));
 		normal = normal * 0.5f + v3{ 0.5f, 0.5f, 0.5f };
-		buffer[faceIdx * 3 + 0] = { face->a, normal };
-		buffer[faceIdx * 3 + 1] = { face->b, normal };
-		buffer[faceIdx * 3 + 2] = { face->c, normal };
+		outputBuffer[(*vertexCount)++] = { face->a.a, normal };
+		outputBuffer[(*vertexCount)++] = { face->b.a, normal };
+		outputBuffer[(*vertexCount)++] = { face->c.a, normal };
+
+		outputBuffer[(*vertexCount)++] = { face->a.dif, normal };
+		outputBuffer[(*vertexCount)++] = { face->b.dif, normal };
+		outputBuffer[(*vertexCount)++] = { face->c.dif, normal };
 	}
 }
 #endif
@@ -90,6 +108,25 @@ bool RayTriangleIntersection(v3 rayOrigin, v3 rayDir, bool infinite, const Trian
 
 	*hit = rayPlaneInt;
 	return true;
+}
+
+v3 BarycentricCoordinates(Triangle *triangle, v3 p)
+{
+	// Fast barycentric function stolen from Real-Time Collision Detection by Christer Ericson
+	v3 result;
+	v3 AB = triangle->b - triangle->a;
+	v3 AC = triangle->c - triangle->a;
+	v3 AP = p - triangle->a;
+	float dot00 = V3Dot(AB, AB);
+	float dot01 = V3Dot(AB, AC);
+	float dot11 = V3Dot(AC, AC);
+	float dot20 = V3Dot(AP, AB);
+	float dot21 = V3Dot(AP, AC);
+	float denom = dot00 * dot11 - dot01 * dot01;
+	result.y = (dot11 * dot20 - dot01 * dot21) / denom;
+	result.z = (dot00 * dot21 - dot01 * dot20) / denom;
+	result.x = 1.0f - result.y - result.z;
+	return result;
 }
 
 bool HitTest_CheckCell(GameState *gameState, int cellX, int cellY, bool swapXY, v3 rayOrigin,
@@ -846,21 +883,23 @@ v3 FurthestInDirection(Transform *transform, Collider *c, v3 dir)
 	return result;
 }
 
-inline v3 GJKSupport(Transform *tA, Transform *tB, Collider *cA, Collider *cB, v3 dir)
+inline GJKPoint GJKSupport(Transform *transformA, Transform *transformB, Collider *colliderA,
+		Collider *colliderB, v3 dir)
 {
 	ASSERT(dir.x != 0 || dir.y != 0 || dir.z != 0);
-	v3 a = FurthestInDirection(tA, cA, dir);
-	v3 b = FurthestInDirection(tB, cB, -dir);
-	return a - b;
+	v3 a = FurthestInDirection(transformA, colliderA, dir);
+	v3 b = FurthestInDirection(transformB, colliderB, -dir);
+	return { a - b, a };
 }
 
-GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
+GJKResult GJKTest(Transform *transformA, Transform *transformB, Collider *colliderA,
+		Collider *colliderB)
 {
 #if DEBUG_BUILD
 	if (g_debugContext->GJKSteps[0] == nullptr)
 	{
 		for (u32 i = 0; i < ArrayCount(g_debugContext->GJKSteps); ++i)
-			g_debugContext->GJKSteps[i] = (DebugVertex *)TransientAlloc(sizeof(DebugVertex) * 12);
+			g_debugContext->GJKSteps[i] = ALLOC_N(TransientAllocator, DebugVertex, 12);
 	}
 #endif
 
@@ -868,9 +907,9 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 	result.hit = true;
 
 	v3 minA, maxA;
-	GetAABB(tA, cA, &minA, &maxA);
+	GetAABB(transformA, colliderA, &minA, &maxA);
 	v3 minB, maxB;
-	GetAABB(tB, cB, &minB, &maxB);
+	GetAABB(transformB, colliderB, &minB, &maxB);
 	if ((minA.x >= maxB.x || minB.x >= maxA.x) ||
 		(minA.y >= maxB.y || minB.y >= maxA.y) ||
 		(minA.z >= maxB.z || minB.z >= maxA.z))
@@ -882,8 +921,8 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 	int foundPointsCount = 1;
 	v3 testDir = { 0, 1, 0 }; // Random initial test direction
 
-	result.points[0] = GJKSupport(tB, tA, cB, cA, testDir); // @Check: why are these in reverse order?
-	testDir = -result.points[0];
+	result.points[0] = GJKSupport(transformB, transformA, colliderB, colliderA, testDir); // @Check: why are these in reverse order?
+	testDir = -result.points[0].dif;
 
 	for (int iterations = 0; result.hit && foundPointsCount < 4; ++iterations)
 	{
@@ -891,7 +930,7 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 		int i_ = iterations;
 		if (!g_debugContext->freezeGJKGeom)
 		{
-			g_debugContext->GJKStepCounts[i_] = 0;
+			g_debugContext->GJKStepsVertexCounts[i_] = 0;
 			g_debugContext->gjkStepCount = i_ + 1;
 		}
 #endif
@@ -907,8 +946,8 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 			break;
 		}
 
-		v3 a = GJKSupport(tB, tA, cB, cA, testDir);
-		if (V3Dot(testDir, a) <= 0)
+		GJKPoint a = GJKSupport(transformB, transformA, colliderB, colliderA, testDir);
+		if (V3Dot(testDir, a.dif) <= 0)
 		{
 			result.hit = false;
 			break;
@@ -916,18 +955,18 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 
 #if DEBUG_BUILD
 		if ((!g_debugContext->freezeGJKGeom) && iterations)
-			g_debugContext->GJKNewPoint[iterations - 1] = a;
+			g_debugContext->GJKNewPoint[iterations - 1] = a.a;
 #endif
 
 		switch (foundPointsCount)
 		{
 			case 1: // Line
 			{
-				v3 b = result.points[0];
-				v3 ab = b - a;
+				GJKPoint b = result.points[0];
+				v3 ab = b.dif - a.dif;
 
 				result.points[foundPointsCount++] = a;
-				testDir = V3Cross(V3Cross(ab, -a), ab);
+				testDir = V3Cross(V3Cross(ab, -a.dif), ab);
 				if (testDir.x == 0 && testDir.y == 0 && testDir.z == 0)
 				{
 					// If -a and ab are colinear, just pick some direction perpendicular to ab.
@@ -936,11 +975,11 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 			} break;
 			case 2: // Plane
 			{
-				v3 b = result.points[1];
-				v3 c = result.points[0];
+				GJKPoint b = result.points[1];
+				GJKPoint c = result.points[0];
 
-				v3 ab = b - a;
-				v3 ac = c - a;
+				v3 ab = b.dif - a.dif;
+				v3 ac = c.dif - a.dif;
 				v3 nor = V3Cross(ac, ab);
 				v3 abNor = V3Cross(nor, ab);
 				v3 acNor = V3Cross(ac, nor);
@@ -948,31 +987,31 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 #if DEBUG_BUILD
 				if (!g_debugContext->freezeGJKGeom)
 				{
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ a, v3{1,0,0} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ b, v3{1,0,0} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ c, v3{1,0,0} };
-					ASSERT(g_debugContext->GJKStepCounts[i_] == 3);
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ a.a, v3{1,0,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ b.a, v3{1,0,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ c.a, v3{1,0,0} };
+					ASSERT(g_debugContext->GJKStepsVertexCounts[i_] == 3);
 				}
 #endif
 
-				if (V3Dot(acNor, -a) > 0)
+				if (V3Dot(acNor, -a.dif) > 0)
 				{
 					result.points[0] = a;
 					result.points[1] = c;
-					testDir = V3Cross(V3Cross(ac, -a), ac);
+					testDir = V3Cross(V3Cross(ac, -a.dif), ac);
 				}
-				else if (V3Dot(abNor, -a) > 0)
+				else if (V3Dot(abNor, -a.dif) > 0)
 				{
 					result.points[0] = a;
 					result.points[1] = b;
-					testDir = V3Cross(V3Cross(ab, -a), ab);
+					testDir = V3Cross(V3Cross(ab, -a.dif), ab);
 				}
 				else
 				{
-					if (V3Dot(nor, -a) > 0)
+					if (V3Dot(nor, -a.dif) > 0)
 					{
 						result.points[foundPointsCount++] = a;
 						testDir = nor;
@@ -987,21 +1026,21 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 					}
 
 					// Assert triangle is wound clockwise
-					v3 A = result.points[2];
-					v3 B = result.points[1];
-					v3 C = result.points[0];
+					v3 A = result.points[2].dif;
+					v3 B = result.points[1].dif;
+					v3 C = result.points[0].dif;
 					ASSERT(V3Dot(testDir, V3Cross(C - A, B - A)) >= 0);
 				}
 			} break;
 			case 3: // Tetrahedron
 			{
-				v3 b = result.points[2];
-				v3 c = result.points[1];
-				v3 d = result.points[0];
+				GJKPoint b = result.points[2];
+				GJKPoint c = result.points[1];
+				GJKPoint d = result.points[0];
 
-				v3 ab = b - a;
-				v3 ac = c - a;
-				v3 ad = d - a;
+				v3 ab = b.dif - a.dif;
+				v3 ac = c.dif - a.dif;
+				v3 ad = d.dif - a.dif;
 
 				v3 abcNor = V3Cross(ac, ab);
 				v3 adbNor = V3Cross(ab, ad);
@@ -1010,87 +1049,87 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 #if DEBUG_BUILD
 				if (!g_debugContext->freezeGJKGeom)
 				{
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ b, v3{1,0,0} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ d, v3{1,0,0} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ c, v3{1,0,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ b.a, v3{1,0,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ d.a, v3{1,0,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ c.a, v3{1,0,0} };
 
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ a, v3{0,1,0} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ b, v3{0,1,0} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ c, v3{0,1,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ a.a, v3{0,1,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ b.a, v3{0,1,0} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ c.a, v3{0,1,0} };
 
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ a, v3{0,0,1} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ d, v3{0,0,1} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ b, v3{0,0,1} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ a.a, v3{0,0,1} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ d.a, v3{0,0,1} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ b.a, v3{0,0,1} };
 
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ a, v3{1,0,1} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ c, v3{1,0,1} };
-					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepCounts[i_]++] =
-						{ d, v3{1,0,1} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ a.a, v3{1,0,1} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ c.a, v3{1,0,1} };
+					g_debugContext->GJKSteps[i_][g_debugContext->GJKStepsVertexCounts[i_]++] =
+						{ d.a, v3{1,0,1} };
 
-					ASSERT(g_debugContext->GJKStepCounts[i_] == 3 * 4);
+					ASSERT(g_debugContext->GJKStepsVertexCounts[i_] == 3 * 4);
 				}
 #endif
 
 				// Assert normals point outside
-				if (V3Dot(d - a, abcNor) > 0)
+				if (V3Dot(d.dif - a.dif, abcNor) > 0)
 				{
 					Log("ERROR: ABC normal facing inward! (dot=%f)\n",
-							V3Dot(d - a, abcNor));
+							V3Dot(d.dif - a.dif, abcNor));
 					ASSERT(false);
 				}
-				if (V3Dot(c - a, adbNor) > 0)
+				if (V3Dot(c.dif - a.dif, adbNor) > 0)
 				{
 					Log("ERROR: ADB normal facing inward! (dot=%f)\n",
-							V3Dot(c - a, adbNor));
+							V3Dot(c.dif - a.dif, adbNor));
 					ASSERT(false);
 				}
-				if (V3Dot(b - a, acdNor) > 0)
+				if (V3Dot(b.dif - a.dif, acdNor) > 0)
 				{
 					Log("ERROR: ACD normal facing inward! (dot=%f)\n",
-							V3Dot(b - a, acdNor));
+							V3Dot(b.dif - a.dif, acdNor));
 					ASSERT(false);
 				}
 
-				if (V3Dot(abcNor, -a) > 0)
+				if (V3Dot(abcNor, -a.dif) > 0)
 				{
-					if (V3Dot(adbNor, -a) > 0)
+					if (V3Dot(adbNor, -a.dif) > 0)
 					{
 						result.points[0] = b;
 						result.points[1] = a;
 						foundPointsCount = 2;
-						testDir = V3Cross(V3Cross(ab, -a), ab);
+						testDir = V3Cross(V3Cross(ab, -a.dif), ab);
 					}
-					else if (V3Dot(acdNor, -a) > 0)
+					else if (V3Dot(acdNor, -a.dif) > 0)
 					{
 						result.points[0] = c;
 						result.points[1] = a;
 						foundPointsCount = 2;
-						testDir = V3Cross(V3Cross(ac, -a), ac);
+						testDir = V3Cross(V3Cross(ac, -a.dif), ac);
 					}
-					else if (V3Dot(V3Cross(abcNor, ab), -a) > 0)
+					else if (V3Dot(V3Cross(abcNor, ab), -a.dif) > 0)
 					{
 						result.points[0] = b;
 						result.points[1] = a;
 						foundPointsCount = 2;
-						testDir = V3Cross(V3Cross(ab, -a), ab);
+						testDir = V3Cross(V3Cross(ab, -a.dif), ab);
 					}
-					else if (V3Dot(V3Cross(ac, abcNor), -a) > 0)
+					else if (V3Dot(V3Cross(ac, abcNor), -a.dif) > 0)
 					{
 						result.points[0] = c;
 						result.points[1] = a;
 						foundPointsCount = 2;
-						testDir = V3Cross(V3Cross(ac, -a), ac);
+						testDir = V3Cross(V3Cross(ac, -a.dif), ac);
 					}
 					else
 					{
@@ -1102,28 +1141,28 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 				}
 				else
 				{
-					if (V3Dot(acdNor, -a) > 0)
+					if (V3Dot(acdNor, -a.dif) > 0)
 					{
-						if (V3Dot(adbNor, -a) > 0)
+						if (V3Dot(adbNor, -a.dif) > 0)
 						{
 							result.points[0] = d;
 							result.points[1] = a;
 							foundPointsCount = 2;
-							testDir = V3Cross(V3Cross(ad, -a), ad);
+							testDir = V3Cross(V3Cross(ad, -a.dif), ad);
 						}
-						else if (V3Dot(V3Cross(acdNor, ac), -a) > 0)
+						else if (V3Dot(V3Cross(acdNor, ac), -a.dif) > 0)
 						{
 							result.points[0] = c;
 							result.points[1] = a;
 							foundPointsCount = 2;
-							testDir = V3Cross(V3Cross(ac, -a), ac);
+							testDir = V3Cross(V3Cross(ac, -a.dif), ac);
 						}
-						else if (V3Dot(V3Cross(ad, acdNor), -a) > 0)
+						else if (V3Dot(V3Cross(ad, acdNor), -a.dif) > 0)
 						{
 							result.points[0] = d;
 							result.points[1] = a;
 							foundPointsCount = 2;
-							testDir = V3Cross(V3Cross(ad, -a), ad);
+							testDir = V3Cross(V3Cross(ad, -a.dif), ad);
 						}
 						else
 						{
@@ -1133,21 +1172,21 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 							testDir = acdNor;
 						}
 					}
-					else if (V3Dot(adbNor, -a) > 0)
+					else if (V3Dot(adbNor, -a.dif) > 0)
 					{
-						if (V3Dot(V3Cross(adbNor, ad), -a) > 0)
+						if (V3Dot(V3Cross(adbNor, ad), -a.dif) > 0)
 						{
 							result.points[0] = d;
 							result.points[1] = a;
 							foundPointsCount = 2;
-							testDir = V3Cross(V3Cross(ad, -a), ad);
+							testDir = V3Cross(V3Cross(ad, -a.dif), ad);
 						}
-						else if (V3Dot(V3Cross(ab, adbNor), -a) > 0)
+						else if (V3Dot(V3Cross(ab, adbNor), -a.dif) > 0)
 						{
 							result.points[0] = b;
 							result.points[1] = a;
 							foundPointsCount = 2;
-							testDir = V3Cross(V3Cross(ab, -a), ab);
+							testDir = V3Cross(V3Cross(ab, -a.dif), ab);
 						}
 						else
 						{
@@ -1167,17 +1206,32 @@ GJKResult GJKTest(Transform *tA, Transform *tB, Collider *cA, Collider *cB)
 		}
 	}
 
+#if DEBUG_BUILD
+	if (g_debugContext->drawSupports)
+	{
+		for (int i = 0; i < foundPointsCount; ++i)
+		{
+			DrawDebugCubeAA(result.points[i].a, 0.04f, {0,1,1});
+			DrawDebugCubeAA(result.points[i].a - result.points[i].dif, 0.04f, {1,1,0});
+		}
+	}
+#endif
+
 	return result;
 }
 
-v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Collider *cA,
-		Collider *cB)
+CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collider *colliderA,
+		Collider *colliderB)
 {
+	GJKResult gjkResult = GJKTest(transformA, transformB, colliderA, colliderB);
+	if (!gjkResult.hit)
+		return {};
+
 #if DEBUG_BUILD
 	if (g_debugContext->polytopeSteps[0] == nullptr)
 	{
 		for (u32 i = 0; i < ArrayCount(g_debugContext->polytopeSteps); ++i)
-			g_debugContext->polytopeSteps[i] = (DebugVertex *)TransientAlloc(sizeof(DebugVertex) * 256);
+			g_debugContext->polytopeSteps[i] = ALLOC_N(TransientAllocator, DebugVertex, 256);
 	}
 #endif
 
@@ -1194,13 +1248,13 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 		f32 epsilon = 0.000001f;
 		for (int i = 0; i < 4; ++i)
 			for (int j = 0; j < i; ++j)
-				if (V3EqualWithEpsilon(gjkResult.points[i], gjkResult.points[j], epsilon))
+				if (V3EqualWithEpsilon(gjkResult.points[i].dif, gjkResult.points[j].dif, epsilon))
 					return {};
 
-		v3 &a = gjkResult.points[3];
-		v3 &b = gjkResult.points[2];
-		v3 &c = gjkResult.points[1];
-		v3 &d = gjkResult.points[0];
+		GJKPoint &a = gjkResult.points[3];
+		GJKPoint &b = gjkResult.points[2];
+		GJKPoint &c = gjkResult.points[1];
+		GJKPoint &d = gjkResult.points[0];
 
 		// We took care during GJK to ensure the BCD triangle faces away from the origin
 		polytope[0] = { b, d, c };
@@ -1222,8 +1276,16 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 		// Save polytope for debug visualization
 		if (!g_debugContext->freezePolytopeGeom && epaStep < DebugContext::epaMaxSteps)
 		{
-			GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[epaStep]);
-			g_debugContext->polytopeStepCounts[epaStep] = polytopeCount;
+			if (g_debugContext->drawEPAClosestFeature)
+			{
+				GenPolytopeMesh(&closestFeature, 1, g_debugContext->polytopeSteps[epaStep],
+						&g_debugContext->polytopeStepsVertexCounts[epaStep]);
+			}
+			else
+			{
+				GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[epaStep],
+						&g_debugContext->polytopeStepsVertexCounts[epaStep]);
+			}
 			g_debugContext->epaStepCount = epaStep + 1;
 		}
 #endif
@@ -1236,18 +1298,25 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 		for (int faceIdx = 0; faceIdx < polytopeCount; ++faceIdx)
 		{
 			EPAFace *face = &polytope[faceIdx];
-			v3 normal = V3Normalize(V3Cross(face->c - face->a, face->b - face->a));
-			f32 distToOrigin = V3Dot(normal, face->a);
+
+			v3 normal = V3Cross(face->c.dif - face->a.dif, face->b.dif - face->a.dif);
+			f32 sqrlen = V3SqrLen(normal);
+			// Some features might be degenerate 0-area triangles
+			if (sqrlen == 0)
+				continue;
+
+			normal = normal / Sqrt(sqrlen);
+			f32 distToOrigin = V3Dot(normal, face->a.dif);
 			if (distToOrigin >= leastDistance)
 				continue;
 
 			// Make sure projected origin is within triangle
-			v3 abNor = V3Cross(face->a - face->b, normal);
-			v3 bcNor = V3Cross(face->b - face->c, normal);
-			v3 acNor = V3Cross(face->c - face->a, normal);
-			if (V3Dot(abNor, -face->a) > 0 ||
-				V3Dot(bcNor, -face->b) > 0 ||
-				V3Dot(acNor, -face->a) > 0)
+			v3 abNor = V3Cross(face->a.dif - face->b.dif, normal);
+			v3 bcNor = V3Cross(face->b.dif - face->c.dif, normal);
+			v3 acNor = V3Cross(face->c.dif - face->a.dif, normal);
+			if (V3Dot(abNor, -face->a.dif) > 0 ||
+				V3Dot(bcNor, -face->b.dif) > 0 ||
+				V3Dot(acNor, -face->a.dif) > 0)
 				continue;
 
 			leastDistance = distToOrigin;
@@ -1281,16 +1350,16 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 		}
 
 		// Expand polytope!
-		v3 testDir = V3Cross(closestFeature.c - closestFeature.a, closestFeature.b - closestFeature.a);
+		v3 testDir = V3Cross(closestFeature.c.dif - closestFeature.a.dif, closestFeature.b.dif - closestFeature.a.dif);
 		if (testDir.x == 0 && testDir.y == 0 && testDir.z == 0)
 		{
 			// Feature is a line. Pick a direction towards the origin.
-			if (closestFeature.a.x != 0 || closestFeature.a.y != 0 || closestFeature.a.z != 0)
-				testDir = -closestFeature.a;
-			else if (closestFeature.b.x != 0 || closestFeature.b.y != 0 || closestFeature.b.z != 0)
-				testDir = -closestFeature.b;
-			else if (closestFeature.c.x != 0 || closestFeature.c.y != 0 || closestFeature.c.z != 0)
-				testDir = -closestFeature.c;
+			if (closestFeature.a.dif.x != 0 || closestFeature.a.dif.y != 0 || closestFeature.a.dif.z != 0)
+				testDir = -closestFeature.a.dif;
+			else if (closestFeature.b.dif.x != 0 || closestFeature.b.dif.y != 0 || closestFeature.b.dif.z != 0)
+				testDir = -closestFeature.b.dif;
+			else if (closestFeature.c.dif.x != 0 || closestFeature.c.dif.y != 0 || closestFeature.c.dif.z != 0)
+				testDir = -closestFeature.c.dif;
 			else
 			{
 				// Give up
@@ -1299,30 +1368,30 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 				break;
 			}
 		}
-		v3 newPoint = GJKSupport(tB, tA, cB, cA, testDir);
+		GJKPoint newPoint = GJKSupport(transformB, transformA, colliderB, colliderA, testDir);
 		VERBOSE_LOG("Found new point { %.02f, %.02f. %.02f } while looking in direction { %.02f, %.02f. %.02f }\n",
-				newPoint.x, newPoint.y, newPoint.z, testDir.x, testDir.y, testDir.z);
+				newPoint.dif.x, newPoint.dif.y, newPoint.dif.z, testDir.x, testDir.y, testDir.z);
 #if DEBUG_BUILD
 		if (!g_debugContext->freezePolytopeGeom && epaStep < DebugContext::epaMaxSteps)
-			g_debugContext->epaNewPoint[epaStep] = newPoint;
+			g_debugContext->epaNewPoint[epaStep] = newPoint.a;
 #endif
 		// Without a little epsilon here we can sometimes pick a point that's already part of the
 		// polytope, resulting in weird artifacts later on. I guess we could manually check for that
 		// but this should be good enough.
 		const f32 epsilon = 0.000001f;
-		if (V3Dot(testDir, newPoint - closestFeature.a) <= epsilon)
+		if (V3Dot(testDir, newPoint.dif - closestFeature.a.dif) <= epsilon)
 		{
 			VERBOSE_LOG("Done! Couldn't find a closer point\n");
 			break;
 		}
 #if DEBUG_BUILD
-		else if (V3Dot(testDir, newPoint - closestFeature.b) <= epsilon)
+		else if (V3Dot(testDir, newPoint.dif - closestFeature.b.dif) <= epsilon)
 		{
 			Log("ERROR! EPA: Redundant check triggered (B)\n");
 			//ASSERT(false);
 			break;
 		}
-		else if (V3Dot(testDir, newPoint - closestFeature.c) <= epsilon)
+		else if (V3Dot(testDir, newPoint.dif - closestFeature.c.dif) <= epsilon)
 		{
 			Log("ERROR! EPA: Redundant check triggered (C)\n");
 			//ASSERT(false);
@@ -1335,9 +1404,9 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 		for (int faceIdx = 0; faceIdx < polytopeCount; )
 		{
 			EPAFace *face = &polytope[faceIdx];
-			v3 normal = V3Cross(face->c - face->a, face->b - face->a);
+			v3 normal = V3Cross(face->c.dif - face->a.dif, face->b.dif - face->a.dif);
 			// Ignore if not facing new point
-			if (V3Dot(normal, newPoint - face->a) <= 0)
+			if (V3Dot(normal, newPoint.dif - face->a.dif) <= 0)
 			{
 				++faceIdx;
 				continue;
@@ -1358,8 +1427,8 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 				for (int holeEdgeIdx = 0; holeEdgeIdx < holeEdgesCount; ++holeEdgeIdx)
 				{
 					const EPAEdge &holeEdge = holeEdges[holeEdgeIdx];
-					if ((edge.a == holeEdge.a && edge.b == holeEdge.b) ||
-						(edge.a == holeEdge.b && edge.b == holeEdge.a))
+					if ((edge.a.dif == holeEdge.a.dif && edge.b.dif == holeEdge.b.dif) ||
+						(edge.a.dif == holeEdge.b.dif && edge.b.dif == holeEdge.a.dif))
 					{
 						holeEdges[holeEdgeIdx] = holeEdges[--holeEdgesCount];
 						found = true;
@@ -1382,9 +1451,10 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 #if DEBUG_BUILD
 			if (!g_debugContext->freezePolytopeGeom && epaStep < DebugContext::epaMaxSteps - 1)
 			{
-				GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[epaStep + 1]);
-				g_debugContext->polytopeStepCounts[epaStep + 1] = polytopeCount;
-				g_debugContext->epaNewPoint[epaStep + 1] = newPoint;
+				GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[epaStep + 1],
+						&g_debugContext->polytopeStepsVertexCounts[epaStep + 1]);
+				g_debugContext->epaNewPoint[epaStep + 1] = newPoint.a;
+				g_debugContext->epaStepCount = epaStep + 1;
 				g_debugContext->freezePolytopeGeom = true;
 			}
 #endif
@@ -1402,21 +1472,68 @@ v3 ComputeDepenetration(GJKResult gjkResult, Transform *tA, Transform *tB, Colli
 				polytopeCount - oldPolytopeCount, polytopeCount);
 	}
 
-	v3 closestFeatureNor = V3Normalize(V3Cross(closestFeature.c - closestFeature.a,
-			closestFeature.b - closestFeature.a));
-	return closestFeatureNor * V3Dot(closestFeatureNor, closestFeature.a);
+	CollisionInfo result;
+	result.hit = true;
+
+	v3 closestFeatureNor = V3Normalize(V3Cross(closestFeature.b.dif - closestFeature.a.dif,
+			closestFeature.c.dif - closestFeature.a.dif));
+	result.depenetrationVector = closestFeatureNor * V3Dot(closestFeatureNor, closestFeature.a.dif);
+
+#if DEBUG_BUILD
+	// Save last step
+	int lastStep = g_debugContext->epaStepCount;
+	if (!g_debugContext->freezePolytopeGeom && lastStep < DebugContext::epaMaxSteps)
+	{
+		if (g_debugContext->drawEPAClosestFeature)
+		{
+			GenPolytopeMesh(&closestFeature, 1, g_debugContext->polytopeSteps[lastStep],
+					&g_debugContext->polytopeStepsVertexCounts[lastStep]);
+		}
+		else
+		{
+			GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[lastStep],
+					&g_debugContext->polytopeStepsVertexCounts[lastStep]);
+		}
+		g_debugContext->epaStepCount = lastStep + 1;
+	}
+
+#if 0
+	DrawDebugCubeAA((closestFeature.a.a + closestFeature.b.a + closestFeature.c.a) / 3, 0.04f, {0,1,0});
+	DrawDebugCubeAA((closestFeature.a.a + closestFeature.b.a + closestFeature.c.a) / 3 -
+			depenetrationVector / 2, 0.04f, {0,0,1});
+	DrawDebugCubeAA((closestFeature.a.a + closestFeature.b.a + closestFeature.c.a) / 3 -
+			depenetrationVector, 0.04f, {0,1,1});
+#endif
+
+	Triangle triangle = { closestFeature.a.dif, closestFeature.b.dif, closestFeature.c.dif };
+	triangle.normal = closestFeatureNor;
+	v3 hit;
+	RayTriangleIntersection({}, result.depenetrationVector, true, &triangle, &hit);
+	DrawDebugCubeAA(hit, 0.04f, {0,1,1});
+
+	v3 bary = BarycentricCoordinates(&triangle, hit);
+	v3 transp = closestFeature.a.a * bary.x + closestFeature.b.a * bary.y + closestFeature.c.a * bary.z;
+	DrawDebugCubeAA(transp, 0.04f, {0,0,1});
+
+	result.hitPoint = transp;
+
+	//g_debugContext->epaNewPoint[lastStep] = (closestFeature.a.a + closestFeature.b.a +
+		//closestFeature.c.a) / 3 - depenetrationVector / 2;
+#endif
+
+	return result;
 }
 
 #if DEBUG_BUILD
-void GetGJKStepGeometry(int step, DebugVertex **buffer, u32 *count)
+void GetGJKStepGeometry(int step, DebugVertex **buffer, u32 *vertexCount)
 {
-	*count = g_debugContext->GJKStepCounts[step];
+	*vertexCount = g_debugContext->GJKStepsVertexCounts[step];
 	*buffer = g_debugContext->GJKSteps[step];
 }
 
-void GetEPAStepGeometry(int step, DebugVertex **buffer, u32 *count)
+void GetEPAStepGeometry(int step, DebugVertex **buffer, u32 *vertexCount)
 {
-	*count = g_debugContext->polytopeStepCounts[step];
+	*vertexCount = g_debugContext->polytopeStepsVertexCounts[step];
 	*buffer = g_debugContext->polytopeSteps[step];
 }
 #endif

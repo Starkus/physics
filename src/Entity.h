@@ -17,8 +17,6 @@ inline bool operator!=(const EntityHandle &a, const EntityHandle &b)
 	return a.id != b.id && a.generation != b.generation;
 }
 
-DECLARE_ARRAY(Transform);
-
 enum ColliderType
 {
 	COLLIDER_CONVEX_HULL,
@@ -57,11 +55,18 @@ struct Collider
 	};
 	EntityHandle entityHandle;
 };
-DECLARE_ARRAY(Collider);
+
+struct RigidBody
+{
+	EntityHandle entityHandle;
+	v3 velocity;
+	v3 angularVelocity;
+	v3 totalForce;
+	v3 totalTorque;
+};
 
 struct MeshInstance
 {
 	EntityHandle entityHandle;
 	const Resource *meshRes;
 };
-DECLARE_ARRAY(MeshInstance);

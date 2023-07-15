@@ -24,20 +24,17 @@
 
 #include "Strings.h"
 #include "MemoryAlloc.h"
-#include "Containers.h"
 #include "Maths.h"
+#include "Containers.h"
 #include "Render.h"
 #include "Geometry.h"
 #include "Resource.h"
 #include "GameInterface.h"
 
-DECLARE_ARRAY(Resource);
-DECLARE_ARRAY(FILETIME);
-
 struct ResourceBank
 {
-	Array_Resource resources;
-	Array_FILETIME lastWriteTimes;
+	Array<Resource, BuddyAllocator> resources;
+	Array<FILETIME, BuddyAllocator> lastWriteTimes;
 };
 
 Memory *g_memory;
@@ -75,21 +72,21 @@ const Resource *LoadResource(ResourceType type, const char *filename)
 
 	u8 *fileBuffer;
 	DWORD fileSize;
-	DWORD error = Win32ReadEntireFile(fullname, &fileBuffer, &fileSize, StackAlloc);
+	DWORD error = Win32ReadEntireFile(fullname, &fileBuffer, &fileSize, StackAllocator::Alloc);
 	if (error == ERROR_SUCCESS)
 	{
 		newResource->type = type;
 		GameResourcePostLoad(newResource, fileBuffer, true);
 	}
 
-	StackFree(oldStackPtr);
+	StackAllocator::Free(oldStackPtr);
 
 	return newResource;
 }
 
 const Resource *GetResource(const char *filename)
 {
-	for (u32 i = 0; i < g_resourceBank->resources.size; ++i)
+	for (u32 i = 0; i < g_resourceBank->resources.count; ++i)
 	{
 		Resource *it = &g_resourceBank->resources[i];
 		if (strcmp(it->filename, filename) == 0)
@@ -169,6 +166,9 @@ bool ProcessKeyboardAndMouse(Controller *c)
 
 				case VK_SPACE:
 					checkButton(c->jump);
+					break;
+				case VK_CONTROL:
+					checkButton(c->crouch);
 					break;
 
 				case VK_UP:
@@ -289,9 +289,9 @@ Resource *CreateResource(const char *filename)
 	strcpy(result.filename, filename);
 
 	FILETIME writeTime = Win32GetLastWriteTime(filename);
-	g_resourceBank->lastWriteTimes[g_resourceBank->lastWriteTimes.size++] = writeTime;
+	g_resourceBank->lastWriteTimes[g_resourceBank->lastWriteTimes.count++] = writeTime;
 
-	Resource *resource = &g_resourceBank->resources[g_resourceBank->resources.size++];
+	Resource *resource = &g_resourceBank->resources[g_resourceBank->resources.count++];
 	*resource = result;
 	return resource;
 }
@@ -303,7 +303,7 @@ bool ReloadResource(Resource *resource)
 
 	u8 *fileBuffer;
 	DWORD fileSize;
-	DWORD error = Win32ReadEntireFile(fullname, &fileBuffer, &fileSize, FrameAlloc);
+	DWORD error = Win32ReadEntireFile(fullname, &fileBuffer, &fileSize, FrameAllocator::Alloc);
 	if (error != ERROR_SUCCESS)
 		return false;
 
@@ -429,7 +429,7 @@ void Win32Start(HINSTANCE hInstance)
 
 #ifdef USING_IMGUI
 	// Setup imgui
-	ImGui::SetAllocatorFunctions(BuddyAlloc, BuddyFree);
+	ImGui::SetAllocatorFunctions(BuddyAllocHook, BuddyAllocator::Free);
 	ImGuiTextBuffer logBuffer;
 	{
 		IMGUI_CHECKVERSION();
@@ -464,8 +464,8 @@ void Win32Start(HINSTANCE hInstance)
 	u64 perfFrequency = largeInteger.LowPart;
 
 	ResourceBank resourceBank;
-	ArrayInit_Resource(&resourceBank.resources, 256, malloc);
-	ArrayInit_FILETIME(&resourceBank.lastWriteTimes, 256, malloc);
+	ArrayInit(&resourceBank.resources, 256);
+	ArrayInit(&resourceBank.lastWriteTimes, 256);
 	g_resourceBank = &resourceBank;
 
 	PlatformContext platformContext = {};
@@ -481,7 +481,7 @@ void Win32Start(HINSTANCE hInstance)
 	{
 		QueryPerformanceCounter(&largeInteger);
 		const u64 newPerfCounter = largeInteger.LowPart;
-		const f64 time = (f64)newPerfCounter / (f64)perfFrequency;
+		//const f64 time = (f64)newPerfCounter / (f64)perfFrequency;
 		const f32 deltaTime = (f32)(newPerfCounter - lastPerfCounter) / (f32)perfFrequency;
 
 		// Check events

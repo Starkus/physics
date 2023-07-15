@@ -39,6 +39,13 @@ void ImguiShowDebugWindow(GameState *gameState)
 	ImGui::Checkbox("Debug draws in wireframe", &g_debugContext->wireframeDebugDraws);
 	ImGui::SliderFloat("Time speed", &gameState->timeMultiplier, 0.001f, 10.0f, "factor = %.3f", ImGuiSliderFlags_Logarithmic);
 
+	if (ImGui::CollapsingHeader("Physics debug"))
+	{
+		ImGui::Checkbox("Pause physics", &g_debugContext->pausePhysics);
+		ImGui::Checkbox("Pause upon contact", &g_debugContext->pausePhysicsOnContact);
+		if (ImGui::Button("Reset momenta")) g_debugContext->resetMomenta = true;
+	}
+
 	if (ImGui::CollapsingHeader("Collision debug"))
 	{
 		ImGui::Checkbox("Disable depenetration", &g_debugContext->disableDepenetration);
@@ -53,9 +60,18 @@ void ImguiShowDebugWindow(GameState *gameState)
 		ImGui::Checkbox("Draw polytope", &g_debugContext->drawGJKPolytope);
 		ImGui::SameLine();
 		ImGui::Checkbox("Freeze", &g_debugContext->freezeGJKGeom);
-		ImGui::InputInt("Step", &g_debugContext->gjkDrawStep);
-		if (g_debugContext->gjkDrawStep >= g_debugContext->gjkStepCount)
-			g_debugContext->gjkDrawStep = g_debugContext->gjkStepCount;
+
+		static bool gjkLastStep = true;
+		ImGui::Checkbox("Last step", &gjkLastStep);
+		ImGui::SameLine();
+		if (ImGui::InputInt("Step", &g_debugContext->gjkDrawStep))
+			gjkLastStep = false;
+
+		if (gjkLastStep)
+			g_debugContext->gjkDrawStep = g_debugContext->gjkStepCount - 1;
+		else
+			g_debugContext->gjkDrawStep = Clamp(g_debugContext->gjkDrawStep, 0,
+					g_debugContext->gjkStepCount - 1);
 
 		ImGui::Separator();
 
@@ -63,9 +79,19 @@ void ImguiShowDebugWindow(GameState *gameState)
 		ImGui::Checkbox("Draw polytope##", &g_debugContext->drawEPAPolytope);
 		ImGui::SameLine();
 		ImGui::Checkbox("Freeze##", &g_debugContext->freezePolytopeGeom);
-		ImGui::InputInt("Step##", &g_debugContext->polytopeDrawStep);
-		if (g_debugContext->polytopeDrawStep >= g_debugContext->epaStepCount)
-			g_debugContext->polytopeDrawStep = g_debugContext->epaStepCount;
+		ImGui::Checkbox("Draw closest feature", &g_debugContext->drawEPAClosestFeature);
+
+		static bool epaLastStep = true;
+		ImGui::Checkbox("Last step##", &epaLastStep);
+		ImGui::SameLine();
+		if (ImGui::InputInt("Step##", &g_debugContext->polytopeDrawStep))
+			epaLastStep = false;
+
+		if (epaLastStep)
+			g_debugContext->polytopeDrawStep = g_debugContext->epaStepCount - 1;
+		else
+			g_debugContext->polytopeDrawStep = Clamp(g_debugContext->polytopeDrawStep, 0,
+					g_debugContext->epaStepCount - 1);
 	}
 
 	ImGui::End();

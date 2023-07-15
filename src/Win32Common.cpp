@@ -56,7 +56,8 @@ inline FILETIME Win32GetLastWriteTime(const char *filename)
 	return lastWriteTime;
 }
 
-DWORD Win32ReadEntireFile(const char *filename, u8 **fileBuffer, DWORD *fileSize, void *(*allocFunc)(u64))
+DWORD Win32ReadEntireFile(const char *filename, u8 **fileBuffer, DWORD *fileSize,
+		void *(*allocFunc)(u64,int))
 {
 	HANDLE file = CreateFileA(
 			filename,
@@ -80,7 +81,7 @@ DWORD Win32ReadEntireFile(const char *filename, u8 **fileBuffer, DWORD *fileSize
 		ASSERT(*fileSize);
 		error = GetLastError();
 
-		*fileBuffer = (u8 *)allocFunc(*fileSize);
+		*fileBuffer = (u8 *)allocFunc(*fileSize, 1);
 		DWORD bytesRead;
 		bool success = ReadFile(
 				file,
@@ -104,7 +105,7 @@ bool PlatformFileExists(const char *filename)
 }
 
 bool PlatformReadEntireFile(const char *filename, u8 **fileBuffer, u64 *fileSize,
-		void *(*allocFunc)(u64))
+		void *(*allocFunc)(u64, int))
 {
 	char fullname[MAX_PATH];
 	DWORD written = GetCurrentDirectory(MAX_PATH, fullname);

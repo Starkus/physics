@@ -17,9 +17,9 @@ void DrawDebugCubeAA(v3 pos, f32 scale, v3 color = {1,0,0})
 	}
 }
 
-void DrawDebugTriangles(v3* vertices, int count, v3 color = {1,0,0})
+void DrawDebugTriangles(v3* vertices, int vertexCount, v3 color = {1,0,0})
 {
-	for (int i = 0; i < count; ++i)
+	for (int i = 0; i < vertexCount; ++i)
 	{
 		if (g_debugContext->debugGeometryBuffer.triangleVertexCount >= 2048)
 			break;
@@ -31,9 +31,9 @@ void DrawDebugTriangles(v3* vertices, int count, v3 color = {1,0,0})
 	}
 }
 
-void DrawDebugTriangles(DebugVertex* vertices, int count)
+void DrawDebugTriangles(DebugVertex* vertices, int vertexCount)
 {
-	for (int i = 0; i < count; ++i)
+	for (int i = 0; i < vertexCount; ++i)
 	{
 		if (g_debugContext->debugGeometryBuffer.triangleVertexCount >= 2048)
 			break;
@@ -43,9 +43,9 @@ void DrawDebugTriangles(DebugVertex* vertices, int count)
 	}
 }
 
-void DrawDebugLines(v3* vertices, int count, v3 color = {1,0,0})
+void DrawDebugLines(v3* vertices, int vertexCount, v3 color = {1,0,0})
 {
-	for (int i = 0; i < count; ++i)
+	for (int i = 0; i < vertexCount; ++i)
 	{
 		if (g_debugContext->debugGeometryBuffer.lineVertexCount >= 2048)
 			break;
