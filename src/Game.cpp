@@ -678,9 +678,6 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 						v3 collisionNormal = V3Normalize(collisionInfo.depenetrationVector);
 						v3 localHitPoint = collisionInfo.hitPoint - transformA->translation;
 
-						Transform *debugArrow =
-							GetEntityTransform(gameState, g_debugContext->debugArrows[0]);
-
 						v3 angVelAtHitPoint = V3Cross(rigidBody->angularVelocity, localHitPoint);
 						v3 velAtHitPoint = rigidBody->velocity + angVelAtHitPoint;
 
