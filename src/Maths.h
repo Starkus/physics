@@ -133,6 +133,16 @@ INTRINSIC u64 CountOnes64(u64 n)
 #endif
 }
 
+inline bool IsPowerOf2(u32 n)
+{
+	return CountOnes(n) == 1;
+}
+
+inline bool IsPowerOf264(u64 n)
+{
+	return CountOnes64(n) == 1;
+}
+
 inline bool EqualWithEpsilon(f32 a, f32 b, f32 epsilon)
 {
 	return a > b - epsilon && a < b + epsilon;
@@ -552,8 +562,9 @@ inline f32 V3Length(const v3 &a)
 
 inline v3 V3Normalize(const v3 &a)
 {
-	v3 result = a / V3Length(a);
-	return result;
+	f32 len = V3Length(a);
+	ASSERT(len > 0.0f && len < INFINITY);
+	return a / len;
 }
 
 inline v4 operator+(const v4 &a, const v4 &b)
@@ -627,8 +638,9 @@ inline f32 V4Length(const v4 &a)
 
 inline v4 V4Normalize(const v4 &a)
 {
-	v4 result = a / V4Length(a);
-	return result;
+	f32 len = V4Length(a);
+	ASSERT(len > 0.0f && len < INFINITY);
+	return a / len;
 }
 
 inline v4 V4Scale(const v4 &v, const v4 &scale)

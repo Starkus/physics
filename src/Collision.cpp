@@ -36,17 +36,24 @@ struct CollisionInfo
 {
 	bool hit;
 	v3 hitPoint;
-	v3 depenetrationVector;
+	// Used to store these together in a 'depenetrationVector' but then we don't get a proper normal
+	// when the depenetration length is 0.
+	v3 collisionNormal;
+	f32 penetrationLength;
 };
 
 #if DEBUG_BUILD
-void GenPolytopeMesh(EPAFace *polytopeData, int faceCount, DebugVertex *outputBuffer, int *vertexCount)
+void GenPolytopeMesh(ArrayView<EPAFace> polytope, DebugVertex *outputBuffer, int *vertexCount)
 {
 	*vertexCount = 0;
-	for (int faceIdx = 0; faceIdx < faceCount; ++faceIdx)
+	for (u32 faceIdx = 0; faceIdx < polytope.count; ++faceIdx)
 	{
-		EPAFace *face = &polytopeData[faceIdx];
-		v3 normal = V3Normalize(V3Cross(face->c.dif - face->a.dif, face->b.dif - face->a.dif));
+		EPAFace *face = &polytope[faceIdx];
+		v3 normal = V3Cross(face->c.dif - face->a.dif, face->b.dif - face->a.dif);
+		f32 normalSqrlen = V3SqrLen(normal);
+		if (normalSqrlen <= 0)
+			continue;
+		normal /= Sqrt(normalSqrlen);
 		normal = normal * 0.5f + v3{ 0.5f, 0.5f, 0.5f };
 		outputBuffer[(*vertexCount)++] = { face->a.a, normal };
 		outputBuffer[(*vertexCount)++] = { face->b.a, normal };
@@ -55,6 +62,10 @@ void GenPolytopeMesh(EPAFace *polytopeData, int faceCount, DebugVertex *outputBu
 		outputBuffer[(*vertexCount)++] = { face->a.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->b.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->c.dif, normal };
+
+		outputBuffer[(*vertexCount)++] = { face->a.a - face->a.dif, normal };
+		outputBuffer[(*vertexCount)++] = { face->b.a - face->b.dif, normal };
+		outputBuffer[(*vertexCount)++] = { face->c.a - face->c.dif, normal };
 	}
 }
 #endif
@@ -1239,8 +1250,8 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 
 	// By now we should have the tetrahedron from GJK
 	// TODO dynamic array?
-	EPAFace polytope[256];
-	int polytopeCount = 0;
+	FixedArray<EPAFace, 256> polytope;
+	polytope.count = 0;
 
 	// Make all faces from tetrahedron
 	{
@@ -1262,7 +1273,7 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 		polytope[1] = { a, b, c };
 		polytope[2] = { a, c, d };
 		polytope[3] = { a, d, b };
-		polytopeCount = 4;
+		polytope.count = 4;
 	}
 
 	EPAFace closestFeature;
@@ -1278,12 +1289,12 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 		{
 			if (g_debugContext->drawEPAClosestFeature)
 			{
-				GenPolytopeMesh(&closestFeature, 1, g_debugContext->polytopeSteps[epaStep],
+				GenPolytopeMesh({ &closestFeature, 1 }, g_debugContext->polytopeSteps[epaStep],
 						&g_debugContext->polytopeStepsVertexCounts[epaStep]);
 			}
 			else
 			{
-				GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[epaStep],
+				GenPolytopeMesh(polytope, g_debugContext->polytopeSteps[epaStep],
 						&g_debugContext->polytopeStepsVertexCounts[epaStep]);
 			}
 			g_debugContext->epaStepCount = epaStep + 1;
@@ -1295,7 +1306,7 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 		int validFacesFound = 0;
 		f32 leastDistance = INFINITY;
 		VERBOSE_LOG("Looking for closest feature\n");
-		for (int faceIdx = 0; faceIdx < polytopeCount; ++faceIdx)
+		for (u32 faceIdx = 0; faceIdx < polytope.count; ++faceIdx)
 		{
 			EPAFace *face = &polytope[faceIdx];
 
@@ -1398,10 +1409,10 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 			break;
 		}
 #endif
-		EPAEdge holeEdges[256];
-		int holeEdgesCount = 0;
-		int oldPolytopeCount = polytopeCount;
-		for (int faceIdx = 0; faceIdx < polytopeCount; )
+		FixedArray<EPAEdge, 256> holeEdges;
+		holeEdges.count = 0;
+		u32 oldPolytopeCount = polytope.count;
+		for (u32 faceIdx = 0; faceIdx < polytope.count; )
 		{
 			EPAFace *face = &polytope[faceIdx];
 			v3 normal = V3Cross(face->c.dif - face->a.dif, face->b.dif - face->a.dif);
@@ -1424,34 +1435,34 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 				const EPAEdge &edge = faceEdges[edgeIdx];
 				// If it's already on the list, remove it
 				bool found = false;
-				for (int holeEdgeIdx = 0; holeEdgeIdx < holeEdgesCount; ++holeEdgeIdx)
+				for (u32 holeEdgeIdx = 0; holeEdgeIdx < holeEdges.count; ++holeEdgeIdx)
 				{
 					const EPAEdge &holeEdge = holeEdges[holeEdgeIdx];
 					if ((edge.a.dif == holeEdge.a.dif && edge.b.dif == holeEdge.b.dif) ||
 						(edge.a.dif == holeEdge.b.dif && edge.b.dif == holeEdge.a.dif))
 					{
-						holeEdges[holeEdgeIdx] = holeEdges[--holeEdgesCount];
+						holeEdges[holeEdgeIdx] = holeEdges[--holeEdges.count];
 						found = true;
 						break;
 					}
 				}
 				// Otherwise add it
 				if (!found)
-					holeEdges[holeEdgesCount++] = edge;
+					*FixedArrayAdd(&holeEdges) = edge;
 			}
 			// Remove face from polytope
-			polytope[faceIdx] = polytope[--polytopeCount];
+			polytope[faceIdx] = polytope[--polytope.count];
 		}
-		int deletedFaces = oldPolytopeCount - polytopeCount;
+		u32 deletedFaces = oldPolytopeCount - polytope.count;
 		VERBOSE_LOG("Deleted %d faces which were facing new point\n", deletedFaces);
-		VERBOSE_LOG("Presumably left a hole with %d edges\n", holeEdgesCount);
-		if (deletedFaces > 1 && holeEdgesCount >= deletedFaces * 3)
+		VERBOSE_LOG("Presumably left a hole with %d edges\n", holeEdges.count);
+		if (deletedFaces > 1 && holeEdges.count >= deletedFaces * 3)
 		{
 			Log("ERROR! EPA: Multiple holes were made on the polytope!\n");
 #if DEBUG_BUILD
 			if (!g_debugContext->freezePolytopeGeom && epaStep < DebugContext::epaMaxSteps - 1)
 			{
-				GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[epaStep + 1],
+				GenPolytopeMesh(polytope, g_debugContext->polytopeSteps[epaStep + 1],
 						&g_debugContext->polytopeStepsVertexCounts[epaStep + 1]);
 				g_debugContext->epaNewPoint[epaStep + 1] = newPoint.a;
 				g_debugContext->epaStepCount = epaStep + 1;
@@ -1459,25 +1470,26 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 			}
 #endif
 		}
-		oldPolytopeCount = polytopeCount;
+		oldPolytopeCount = polytope.count;
 		// Now we should have a hole in the polytope, of which all edges are in holeEdges
 
-		for (int holeEdgeIdx = 0; holeEdgeIdx < holeEdgesCount; ++holeEdgeIdx)
+		for (u32 holeEdgeIdx = 0; holeEdgeIdx < holeEdges.count; ++holeEdgeIdx)
 		{
 			const EPAEdge &holeEdge = holeEdges[holeEdgeIdx];
 			EPAFace newFace = { holeEdge.a, holeEdge.b, newPoint };
-			polytope[polytopeCount++] = newFace;
+			*FixedArrayAdd(&polytope) = newFace;
 		}
 		VERBOSE_LOG("Added %d faces to fill the hole. Polytope now has %d faces\n",
-				polytopeCount - oldPolytopeCount, polytopeCount);
+				polytope.count - oldPolytopeCount, polytope.count);
 	}
 
 	CollisionInfo result;
 	result.hit = true;
 
-	v3 closestFeatureNor = V3Normalize(V3Cross(closestFeature.b.dif - closestFeature.a.dif,
-			closestFeature.c.dif - closestFeature.a.dif));
-	result.depenetrationVector = closestFeatureNor * V3Dot(closestFeatureNor, closestFeature.a.dif);
+	v3 closestFeatureNor = V3Normalize(V3Cross(closestFeature.c.dif - closestFeature.a.dif,
+			closestFeature.b.dif - closestFeature.a.dif));
+	result.collisionNormal = closestFeatureNor;
+	result.penetrationLength = V3Dot(closestFeatureNor, closestFeature.a.dif);
 
 #if DEBUG_BUILD
 	// Save last step
@@ -1486,29 +1498,22 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 	{
 		if (g_debugContext->drawEPAClosestFeature)
 		{
-			GenPolytopeMesh(&closestFeature, 1, g_debugContext->polytopeSteps[lastStep],
+			GenPolytopeMesh({ &closestFeature, 1 }, g_debugContext->polytopeSteps[lastStep],
 					&g_debugContext->polytopeStepsVertexCounts[lastStep]);
 		}
 		else
 		{
-			GenPolytopeMesh(polytope, polytopeCount, g_debugContext->polytopeSteps[lastStep],
+			GenPolytopeMesh(polytope, g_debugContext->polytopeSteps[lastStep],
 					&g_debugContext->polytopeStepsVertexCounts[lastStep]);
 		}
 		g_debugContext->epaStepCount = lastStep + 1;
 	}
-
-#if 0
-	DrawDebugCubeAA((closestFeature.a.a + closestFeature.b.a + closestFeature.c.a) / 3, 0.04f, {0,1,0});
-	DrawDebugCubeAA((closestFeature.a.a + closestFeature.b.a + closestFeature.c.a) / 3 -
-			depenetrationVector / 2, 0.04f, {0,0,1});
-	DrawDebugCubeAA((closestFeature.a.a + closestFeature.b.a + closestFeature.c.a) / 3 -
-			depenetrationVector, 0.04f, {0,1,1});
 #endif
 
 	Triangle triangle = { closestFeature.a.dif, closestFeature.b.dif, closestFeature.c.dif };
 	triangle.normal = closestFeatureNor;
 	v3 hit;
-	RayTriangleIntersection({}, result.depenetrationVector, true, &triangle, &hit);
+	RayTriangleIntersection({}, result.collisionNormal, true, &triangle, &hit);
 	DrawDebugCubeAA(hit, 0.04f, {0,1,1});
 
 	v3 bary = BarycentricCoordinates(&triangle, hit);
@@ -1516,10 +1521,6 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 	DrawDebugCubeAA(transp, 0.04f, {0,0,1});
 
 	result.hitPoint = transp;
-
-	//g_debugContext->epaNewPoint[lastStep] = (closestFeature.a.a + closestFeature.b.a +
-		//closestFeature.c.a) / 3 - depenetrationVector / 2;
-#endif
 
 	return result;
 }

@@ -105,20 +105,22 @@ inline u64 ArrayPointerToIndex(Array<T, A> *array, void* pointer)
 	return ((u64)pointer - (u64)array->data) / sizeof(T);
 }
 
-template <typename T, u64 capacity>
+template <typename T, u32 capacity>
 struct FixedArray
 {
 	T data[capacity];
-	u64 count;
+	u32 count;
 
 	T &operator[](s64 idx)
 	{
-		ASSERT(idx >= 0 && (u64)idx < capacity);
+		ASSERT(idx <= U32_MAX);
+		ASSERT(idx >= 0 && (u32)idx < capacity);
 		return data[idx];
 	}
 
 	const T &operator[](s64 idx) const
 	{
+		ASSERT(idx <= U32_MAX);
 		ASSERT(idx >= 0 && (u64)idx < capacity);
 		return data[idx];
 	}
@@ -134,7 +136,7 @@ struct FixedArray
 	}
 };
 
-template <typename T, u64 capacity>
+template <typename T, u32 capacity>
 T *FixedArrayAdd(FixedArray<T, capacity> *array)
 {
 	ASSERT(array->count < capacity);
@@ -142,7 +144,7 @@ T *FixedArrayAdd(FixedArray<T, capacity> *array)
 	return result;
 }
 
-template <typename T, u64 capacity>
+template <typename T, u32 capacity>
 inline T *FixedArrayBack(FixedArray<T, capacity> *array)
 {
 	ASSERT(array->count > 0);
@@ -605,22 +607,6 @@ template <typename K, typename A>
 u64 HashSetCount(HashSet<K,A> hashSet)
 {
 	return BitfieldCount((u32 *)hashSet.memory, hashSet.capacity >> 5);
-}
-
-template <typename A>
-void HashSetPrint(HashSet<u32,A> hashSet)
-{
-	Print("{ ");
-	bool first = true;
-	for (u32 slotIdx = 0; slotIdx < hashSet.capacity; ++slotIdx)
-		if (HashSetSlotOccupied(hashSet, slotIdx))
-		{
-			if (!first)
-				Print(", ");
-			Print("%u", hashSet.keys[slotIdx]);
-			first = false;
-		}
-	Print(" }\n");
 }
 
 template <typename K, typename A>

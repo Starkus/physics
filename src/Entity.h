@@ -59,10 +59,31 @@ struct Collider
 struct RigidBody
 {
 	EntityHandle entityHandle;
+
 	v3 velocity;
 	v3 angularVelocity;
+
 	v3 totalForce;
 	v3 totalTorque;
+
+	f32 invMass;
+	f32 restitution;
+	f32 staticFriction;
+	f32 dynamicFriction;
+	mat4 invMomentOfInertiaTensor;
+};
+
+RigidBody RIGID_BODY_STATIC = {
+	.entityHandle = ENTITY_HANDLE_INVALID,
+	.velocity = {},
+	.angularVelocity = {},
+	.totalForce = {},
+	.totalTorque = {},
+	.invMass = 0,
+	.restitution = 1.0f,
+	.staticFriction = 0.4f,
+	.dynamicFriction = 0.2f,
+	.invMomentOfInertiaTensor = {}
 };
 
 struct MeshInstance
