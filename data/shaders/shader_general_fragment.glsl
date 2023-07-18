@@ -23,7 +23,8 @@ void main()
 		0, 0, 0, 1
 	);
 	vec3 nor = (vec4(normalMap, 0) * ntb).rgb;
-	float light = dot(nor, -lightDirection);
+	float light = dot(normal, -lightDirection);
+	//light = 0.5f;
 
 	// Shadow
 	vec3 shadowCoords = lightSpaceVertex.xyz / lightSpaceVertex.w;

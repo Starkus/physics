@@ -65,6 +65,7 @@ struct DebugContext
 	bool verboseCollisionLogging;
 
 	bool disableDepenetration;
+	bool disableFriction;
 
 	// GJK EPA
 	bool drawGJKPolytope;
@@ -95,12 +96,17 @@ struct DebugContext
 	EditMode currentEditMode;
 	bool editRelative;
 
+	bool pauseUpdates;
+
 	EntityHandle debugArrows[4];
 
 	DeviceProgram editorSelectedProgram;
 	DeviceProgram editorGizmoProgram;
 };
 #endif
+
+struct CollisionPair;
+struct CachedHitPoint;
 
 #define MAX_ENTITIES 4096
 struct GameState
@@ -132,4 +138,6 @@ struct GameState
 	// @Cleanup: move to some Render Device Context or something?
 	mat4 invViewMatrix, viewMatrix, projMatrix, lightSpaceMatrix;
 	DeviceProgram program;
+
+	HashMap<CollisionPair, FixedArray<CachedHitPoint, 8>, BuddyAllocator> hitPointCache;
 };

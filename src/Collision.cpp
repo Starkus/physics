@@ -34,12 +34,36 @@ struct EPAEdge
 
 struct CollisionInfo
 {
-	bool hit;
-	v3 hitPoint;
+	int hitCount;
 	// Used to store these together in a 'depenetrationVector' but then we don't get a proper normal
 	// when the depenetration length is 0.
-	v3 collisionNormal;
-	f32 penetrationLength;
+	v3 hitNormal;
+	f32 depth;
+	v3 hitPoints[8];
+	f32 hitDepths[8];
+};
+
+struct CollisionPair
+{
+	EntityHandle a;
+	EntityHandle b;
+};
+inline bool operator==(const CollisionPair& lhs, const CollisionPair& rhs)
+{
+	return lhs.a.id == rhs.a.id && lhs.a.generation == rhs.a.generation &&
+		   lhs.b.id == rhs.b.id && lhs.b.generation == rhs.b.generation;
+}
+inline u32 Hash(CollisionPair key)
+{
+	u32 hash = Hash(key.a.id);
+	hash ^= Hash(key.b.id);
+	return hash;
+}
+
+struct CachedHitPoint
+{
+	v3 localA;
+	v3 localB;
 };
 
 #if DEBUG_BUILD
@@ -59,6 +83,7 @@ void GenPolytopeMesh(ArrayView<EPAFace> polytope, DebugVertex *outputBuffer, int
 		outputBuffer[(*vertexCount)++] = { face->b.a, normal };
 		outputBuffer[(*vertexCount)++] = { face->c.a, normal };
 
+#if 0
 		outputBuffer[(*vertexCount)++] = { face->a.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->b.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->c.dif, normal };
@@ -66,6 +91,7 @@ void GenPolytopeMesh(ArrayView<EPAFace> polytope, DebugVertex *outputBuffer, int
 		outputBuffer[(*vertexCount)++] = { face->a.a - face->a.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->b.a - face->b.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->c.a - face->c.dif, normal };
+#endif
 	}
 }
 #endif
@@ -116,6 +142,32 @@ bool RayTriangleIntersection(v3 rayOrigin, v3 rayDir, bool infinite, const Trian
 		if (V3Dot(v, ca) < V3Dot(v, rayPlaneInt - c))
 			return false;
 	}
+
+	*hit = rayPlaneInt;
+	return true;
+}
+
+bool ProjectToTriangle(v3 rayOrigin, v3 rayDir, const Triangle *triangle, v3 *hit)
+{
+	const v3 &a = triangle->a;
+	const v3 &b = triangle->b;
+	const v3 &c = triangle->c;
+	const v3 &nor = triangle->normal;
+
+	const v3 ab = b - a;
+	const v3 bc = c - b;
+	const v3 ca = a - c;
+
+	f32 rayDistAlongNormal = V3Dot(rayDir, -nor);
+	const f32 epsilon = 0.000001f;
+	if (EqualWithEpsilon(rayDistAlongNormal, 0, epsilon))
+		// Perpendicular
+		return false;
+
+	f32 aDistAlongNormal = V3Dot(a - rayOrigin, -nor);
+	f32 factor = aDistAlongNormal / rayDistAlongNormal;
+
+	v3 rayPlaneInt = rayOrigin + rayDir * factor;
 
 	*hit = rayPlaneInt;
 	return true;
@@ -1231,8 +1283,8 @@ GJKResult GJKTest(Transform *transformA, Transform *transformB, Collider *collid
 	return result;
 }
 
-CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collider *colliderA,
-		Collider *colliderB)
+CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transform *transformB,
+		Collider *colliderA, Collider *colliderB)
 {
 	GJKResult gjkResult = GJKTest(transformA, transformB, colliderA, colliderB);
 	if (!gjkResult.hit)
@@ -1484,12 +1536,13 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 	}
 
 	CollisionInfo result;
-	result.hit = true;
+	result.hitCount = 1;
 
 	v3 closestFeatureNor = V3Normalize(V3Cross(closestFeature.c.dif - closestFeature.a.dif,
 			closestFeature.b.dif - closestFeature.a.dif));
-	result.collisionNormal = closestFeatureNor;
-	result.penetrationLength = V3Dot(closestFeatureNor, closestFeature.a.dif);
+
+	result.hitNormal = closestFeatureNor;
+	result.depth = V3Dot(closestFeatureNor, closestFeature.a.dif);
 
 #if DEBUG_BUILD
 	// Save last step
@@ -1510,17 +1563,133 @@ CollisionInfo TestCollision(Transform *transformA, Transform *transformB, Collid
 	}
 #endif
 
+	v3 normalA = V3Cross(closestFeature.c.a - closestFeature.a.a, closestFeature.b.a - closestFeature.a.a);
+	v3 normalB = V3Cross(
+			(closestFeature.c.a - closestFeature.c.dif) - (closestFeature.a.a - closestFeature.a.dif),
+			(closestFeature.b.a - closestFeature.b.dif) - (closestFeature.a.a - closestFeature.a.dif));
+	f32 normalSqrLenA = V3SqrLen(normalA);
+	f32 normalSqrLenB = V3SqrLen(normalB);
+
+	Triangle triangleA = { closestFeature.a.a, closestFeature.b.a, closestFeature.c.a };
+	Triangle triangleB = {
+			closestFeature.a.a - closestFeature.a.dif,
+			closestFeature.b.a - closestFeature.b.dif,
+			closestFeature.c.a - closestFeature.c.dif };
+
+	// Choose triangle with largest area
+	Triangle worldTriangle;
+	if (normalSqrLenA > normalSqrLenB)
+	{
+		worldTriangle = triangleA;
+		worldTriangle.normal = -normalA / Sqrt(normalSqrLenA);
+	}
+	else
+	{
+		worldTriangle = triangleB;
+		if (normalSqrLenB)
+			worldTriangle.normal = normalB / Sqrt(normalSqrLenB);
+		else
+			worldTriangle.normal = closestFeatureNor;
+	}
+
+	DrawDebugCubeAA(worldTriangle.a, 0.03f, {1,0.5f,1});
+	DrawDebugCubeAA(worldTriangle.b, 0.03f, {1,0.5f,1});
+	DrawDebugCubeAA(worldTriangle.c, 0.03f, {1,0.5f,1});
+
 	Triangle triangle = { closestFeature.a.dif, closestFeature.b.dif, closestFeature.c.dif };
 	triangle.normal = closestFeatureNor;
 	v3 hit;
-	RayTriangleIntersection({}, result.collisionNormal, true, &triangle, &hit);
-	DrawDebugCubeAA(hit, 0.04f, {0,1,1});
+	ProjectToTriangle({}, result.hitNormal, &triangle, &hit);
 
 	v3 bary = BarycentricCoordinates(&triangle, hit);
-	v3 transp = closestFeature.a.a * bary.x + closestFeature.b.a * bary.y + closestFeature.c.a * bary.z;
-	DrawDebugCubeAA(transp, 0.04f, {0,0,1});
+	v3 hitWorldSpace = worldTriangle.a * bary.x + worldTriangle.b * bary.y + worldTriangle.c * bary.z;
+	//hitWorldSpace -= closestFeatureNor * result.depth;
+	//DrawDebugCubeAA(hitWorldSpace, 0.04f, {0,0,1});
+	//DrawDebugCubeAA(hitWorldSpace - closestFeatureNor * result.depth, 0.04f, {0,0,1});
 
-	result.hitPoint = transp;
+	result.hitPoints[0] = hitWorldSpace;
+	result.hitDepths[0] = result.depth;
+
+	CollisionPair key = { colliderA->entityHandle, colliderB->entityHandle };
+	FixedArray<CachedHitPoint, 8>* cache = HashMapGet(gameState->hitPointCache, key);
+	if (!cache)
+	{
+		// @Todo: avoid looking-up twice
+		cache = HashMapGetOrAdd(&gameState->hitPointCache, key);
+		*cache = {};
+	}
+
+	int idxOfWorstCachedPoint = -1;
+	f32 smallestDepth = INFINITY;
+	int ii = 1;
+	for (int i = 0; i < (int)cache->count; )
+	{
+		CachedHitPoint *cachedPoint = &(*cache)[i];
+		v3 worldA = TransformPoint(*transformA, cachedPoint->localA);
+		v3 worldB = TransformPoint(*transformB, cachedPoint->localB);
+
+		// Remove points that have drifted apart
+		v3 distVec = worldB - worldA;
+		f32 normalDist = V3Dot(distVec, result.hitNormal);
+#if 1
+		if (!EqualWithEpsilon(normalDist, 0, 0.03f))
+		{
+			(*cache)[i] = (*cache)[--cache->count];
+			continue;
+		}
+#endif
+#if 1
+		f32 tangSqrDist = V3SqrLen(distVec - result.hitNormal * normalDist);
+		if (tangSqrDist > 0.03f)
+		{
+			(*cache)[i] = (*cache)[--cache->count];
+			continue;
+		}
+#endif
+
+		// Remove points close to the new point
+		if (V3SqrLen(worldA - hitWorldSpace) < 0.05f)
+		{
+			(*cache)[i] = (*cache)[--cache->count];
+			continue;
+		}
+
+		v3 color = { f32(ii%2), f32((ii/2)%2), f32((ii/4)%2) };
+		++ii;
+		DrawDebugCubeAA(worldA, 0.04f, color);
+		DrawDebugCubeAA(worldB, 0.04f, color * 0.5f);
+
+		v3 hitA = {};
+		ProjectToTriangle(worldA, result.hitNormal, &worldTriangle, &hitA);
+		DrawDebugArrow(worldA, hitA, color);
+
+		v3 depthVec = hitA - worldA;
+		f32 depth = V3Dot(depthVec, result.hitNormal);
+		// Remove points that are not colliding anymore
+		if (depth < -0.03f)
+		{
+			(*cache)[i] = (*cache)[--cache->count];
+			continue;
+		}
+
+		result.hitPoints[result.hitCount] = worldA;
+		result.hitDepths[result.hitCount] = depth;
+		++result.hitCount;
+
+		if (depth < smallestDepth)
+		{
+			smallestDepth = depth;
+			idxOfWorstCachedPoint = i;
+		}
+		++i;
+	}
+	if (cache->count == 8)
+		(*cache)[idxOfWorstCachedPoint] = (*cache)[--cache->count];
+
+	// Store hit point in cache
+	v3 aLocalHit = ReverseTransformPoint(*transformA, hitWorldSpace);
+	v3 bLocalHit = ReverseTransformPoint(*transformB, hitWorldSpace);
+	*FixedArrayAdd(cache) = CachedHitPoint{ aLocalHit, bLocalHit };
 
 	return result;
 }

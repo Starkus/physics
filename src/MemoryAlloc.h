@@ -43,6 +43,7 @@ public:
 class TransientAllocator {
 public:
 	static void *Alloc(u64 size, int alignment);
+	static void Free(void *ptr);
 };
 
 class BuddyAllocator {

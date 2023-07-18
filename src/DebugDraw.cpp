@@ -57,6 +57,38 @@ void DrawDebugLines(v3* vertices, int vertexCount, v3 color = {1,0,0})
 	}
 }
 
+inline void DrawDebugLine(v3 a, v3 b, v3 color = {1,0,0})
+{
+	v3 array[] = { a, b };
+	DrawDebugLines(array, 2, color);
+}
+
+void DrawDebugArrow(v3 a, v3 b, v3 color = {1,0,0})
+{
+	if (V3EqualWithEpsilon(a, b, 0.00001f))
+		return;
+
+	v3 dir = V3Normalize(b - a);
+
+	v3 x = V3Cross(dir, {0,0,1});
+	if (V3EqualWithEpsilon(x, {}, 0.00001f))
+		x = {1,0,0};
+	else
+		x = V3Normalize(x);
+
+	v3 up = V3Cross(dir, x);
+
+	dir *= 2.0f;
+	v3 vertices[] = {
+		a, b,
+		b, b - (dir + x)  * 0.05f,
+		b, b - (dir - x)  * 0.05f,
+		b, b - (dir + up) * 0.05f,
+		b, b - (dir - up) * 0.05f
+	};
+	DrawDebugLines(vertices, ArrayCount(vertices), color);
+}
+
 // Util functions
 void DrawDebugWiredBox(v3 min, v3 max, v3 color = {1,0,0})
 {

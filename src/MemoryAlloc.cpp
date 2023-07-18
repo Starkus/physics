@@ -120,6 +120,10 @@ void *TransientAllocator::Alloc(u64 size, int alignment)
 
 	return result;
 }
+void TransientAllocator::Free(void *ptr)
+{
+	ASSERT(false);
+}
 
 void *BuddyFindFreeBlockOfOrder(u8 desiredOrder, u8 **bookkeep)
 {

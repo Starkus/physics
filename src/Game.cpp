@@ -155,6 +155,7 @@ void StartGame()
 	ArrayInit(&gameState->meshInstances, 4096);
 	ArrayInit(&gameState->colliders, 4096);
 	ArrayInit(&gameState->rigidBodies, 4096);
+	HashMapInit(&gameState->hitPointCache, 256);
 
 	// @Hack: Hmmm
 	memset(gameState->entityTransforms, 0xFF, sizeof(gameState->entityTransforms));
@@ -332,6 +333,37 @@ void StartGame()
 
 		const Resource *cubeRes = GetResource("cube.b");
 		testEntityHandle = AddEntity(gameState, &transform);
+		transform->translation = { 3.0f, 5.0f, 4.0f };
+		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI, 0, 0 });
+		meshInstance = ArrayAdd(&gameState->meshInstances);
+		meshInstance->meshRes = cubeRes;
+		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
+		collider = ArrayAdd(&gameState->colliders);
+		collider->type = COLLIDER_CUBE;
+		collider->cube.radius = 1;
+		collider->cube.offset = {};
+		EntityAssignCollider(gameState, testEntityHandle, collider);
+		RigidBody *rigidBody = ArrayAdd(&gameState->rigidBodies);
+		*rigidBody = {};
+		rigidBody->invMass = 1.0f;
+		rigidBody->restitution = 0.3f;
+		rigidBody->staticFriction = 0.4f;
+		rigidBody->dynamicFriction = 0.2f;
+		{
+			// Moment of inertia of 2m^3, 1kg cube
+			f32 r2 = collider->cube.radius * 2;
+			f32 s = ((1.0f/rigidBody->invMass)/6.0f) * (r2 * r2);
+			f32 invs = 1.0f/s;
+			rigidBody->invMomentOfInertiaTensor = {
+				invs,	0,		0,		0,
+				0,		invs,	0,		0,
+				0,		0,		invs,	0,
+				0,		0,		0,		0
+			};
+		}
+		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
+
+		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -3.0f, 5.0f, 1.0f };
 		transform->rotation = QUATERNION_IDENTITY;
 		meshInstance = ArrayAdd(&gameState->meshInstances);
@@ -370,6 +402,7 @@ void StartGame()
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 0.0f, 0.0f, -20.0f };
 		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI, 0, 0 });
+		transform->scale = { 20.0f, 20.0f, 20.0f };
 		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = cubeRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
@@ -378,36 +411,6 @@ void StartGame()
 		collider->cube.radius = 20;
 		collider->cube.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
-
-		testEntityHandle = AddEntity(gameState, &transform);
-		transform->translation = { 3.0f, 5.0f, 4.0f };
-		transform->rotation = QuaternionFromEulerZYX(v3{ HALFPI, 0, 0 });
-		meshInstance = ArrayAdd(&gameState->meshInstances);
-		meshInstance->meshRes = cubeRes;
-		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
-		collider = ArrayAdd(&gameState->colliders);
-		collider->type = COLLIDER_CUBE;
-		collider->cube.radius = 1;
-		collider->cube.offset = {};
-		EntityAssignCollider(gameState, testEntityHandle, collider);
-		RigidBody *rigidBody = ArrayAdd(&gameState->rigidBodies);
-		*rigidBody = {};
-		rigidBody->invMass = 1.0f;
-		rigidBody->restitution = 0.3f;
-		rigidBody->staticFriction = 0.4f;
-		rigidBody->dynamicFriction = 0.2f;
-		{
-			// Moment of inertia of 2m^3, 1kg cube
-			f32 s = ((1.0f/rigidBody->invMass)/6.0f) * (4 * collider->cube.radius * collider->cube.radius);
-			f32 invs = 1.0f/s;
-			rigidBody->invMomentOfInertiaTensor = {
-				invs,	0,		0,		0,
-				0,		invs,	0,		0,
-				0,		0,		invs,	0,
-				0,		0,		0,		0
-			};
-		}
-		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
 
 		const Resource *sphereRes = GetResource("sphere.b");
 		testEntityHandle = AddEntity(gameState, &transform);
@@ -436,8 +439,9 @@ void StartGame()
 		collider->cylinder.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
+#if 1
 		testEntityHandle = AddEntity(gameState, &transform);
-		transform->translation = { -3.0f, 5.0f, 4.0f };
+		transform->translation = { -3.0f, 5.0f, 5.0f };
 		transform->rotation = QUATERNION_IDENTITY;
 		meshInstance = ArrayAdd(&gameState->meshInstances);
 		meshInstance->meshRes = cylinderRes;
@@ -469,6 +473,7 @@ void StartGame()
 			};
 		}
 		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
+#endif
 
 		const Resource *capsuleRes = GetResource("capsule.b");
 		testEntityHandle = AddEntity(gameState, &transform);
@@ -558,7 +563,7 @@ void Render(GameState *gameState, f32 deltaTime)
 		{
 			Transform *transform = GetEntityTransform(gameState, meshInstance->entityHandle);
 
-			const mat4 model = Mat4Compose(transform->translation, transform->rotation);
+			const mat4 model = Mat4Compose(*transform);
 
 			// @Improve: don't rebind program, textures and all for every mesh! Maybe sort by
 			// material.
@@ -641,10 +646,6 @@ void Render(GameState *gameState, f32 deltaTime)
 					meshAttribs, instAttribs);
 		}
 
-		dgb->debugCubeCount = 0;
-		dgb->triangleVertexCount = 0;
-		dgb->lineVertexCount = 0;
-
 		//EnableDepthTest();
 		SetBackfaceCullingEnabled(true);
 		SetFillMode(RENDER_FILL);
@@ -706,39 +707,60 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 		deltaTime = 1 / 60.0f;
 	}
 
-#if 0
-	f32 mass = 1.0f;
-	f32 restitution = 0.3f;
-	// @Hardcoded: moment of inertia of 1m^3, 1kg cube
-	f32 s = (mass/12.0f) * (4.0f*4.0f);
-	f32 invs = 1.0f/s;
-	mat4 invMomentOfInertia =
+	// Update
+#if DEBUG_BUILD
+	if (!g_debugContext->pauseUpdates)
+#endif
 	{
-		invs,	0,		0,		0,
-		0,		invs,	0,		0,
-		0,		0,		invs,	0,
-		0,		0,		0,		0
-	};
-	mat4 momentOfInertia =
-	{
-		s,	0,	0,	0,
-		0,	s,	0,	0,
-		0,	0,	s,	0,
-		0,	0,	0,	0
-	};
+#if DEBUG_BUILD
+		{
+			DebugGeometryBuffer *dgb = &g_debugContext->debugGeometryBuffer;
+			dgb->debugCubeCount = 0;
+			dgb->triangleVertexCount = 0;
+			dgb->lineVertexCount = 0;
+		}
 #endif
 
-	// Update
-	{
+		for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
+		{
+			RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
+			Transform *transform = GetEntityTransform(gameState, rigidBody->entityHandle);
+			ASSERT(transform); // There should never be an orphaned rigid body.
+
+#if 0
+			// Warm starting
+			rigidBody->velocity += rigidBody->lastFrameForces * rigidBody->invMass * deltaTime;
+
+			mat4 R = Mat4FromQuaternion(transform->rotation);
+			mat4 noR = Mat4Transpose(R);
+			mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, rigidBody->invMomentOfInertiaTensor), noR);
+
+			v3 angularAcceleration = Mat4TransformDirection(worldInvMomentOfInertia,
+					rigidBody->lastFrameTorque);
+			rigidBody->angularVelocity += angularAcceleration * deltaTime;
+#endif
+
+#if 1
+			// Gravity
+			rigidBody->velocity.z -= 9.8f * deltaTime;
+
+			rigidBody->lastFrameForces  = { 0, 0, 0 };
+			rigidBody->lastFrameTorque = { 0, 0, 0 };
+#endif
+		}
+
 		// Collision
 		struct Collision
 		{
-			v3 hitPoint;
-			v3 hitNormal;
-			f32 penetrationLength;
-			f32 normalImpulseMag;
 			EntityHandle entityA;
 			EntityHandle entityB;
+			v3 hitNormal;
+			f32 depth;
+			int hitCount;
+			v3 hitPoints[8];
+			f32 hitDepths[8];
+			// We save these to calculate friction
+			f32 normalImpulseMags[8];
 		};
 		DynamicArray<Collision, FrameAllocator> collisions;
 		DynamicArrayInit(&collisions, 32);
@@ -755,17 +777,24 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				ASSERT(transformB); // There should never be an orphaned collider.
 
 				// @Improve: better collision against multiple colliders?
-				CollisionInfo collisionInfo = TestCollision(transformA, transformB, colliderA,
-						colliderB);
-				if (collisionInfo.hit)
+				CollisionInfo collisionInfo = TestCollision(gameState, transformA, transformB,
+						colliderA, colliderB);
+				if (collisionInfo.hitCount)
 				{
-					*DynamicArrayAdd(&collisions) = {
-						.hitPoint = collisionInfo.hitPoint,
-						.hitNormal = collisionInfo.collisionNormal,
-						.penetrationLength = collisionInfo.penetrationLength,
+					Collision *newCollision = DynamicArrayAdd(&collisions);
+					*newCollision = {
 						.entityA = colliderA->entityHandle,
-						.entityB = colliderB->entityHandle
+						.entityB = colliderB->entityHandle,
+						.hitNormal = collisionInfo.hitNormal,
+						.depth = collisionInfo.depth,
+						.hitCount = collisionInfo.hitCount,
 					};
+					memcpy(newCollision->hitPoints, collisionInfo.hitPoints,
+							collisionInfo.hitCount * sizeof(v3));
+					memcpy(newCollision->hitDepths, collisionInfo.hitDepths,
+							collisionInfo.hitCount * sizeof(f32));
+					memset(newCollision->normalImpulseMags, 0,
+							collisionInfo.hitCount * sizeof(v3));
 
 #if DEBUG_BUILD
 					if (g_debugContext->pausePhysicsOnContact)
@@ -778,8 +807,8 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 		for (u32 collisionIdx = 0; collisionIdx < collisions.count; ++collisionIdx)
 		{
 			Collision* collision = &collisions[collisionIdx];
-			//if (collision->penetrationLength <= 0.0f)
-				//continue;
+			if (collision->depth <= 0.0f)
+				continue;
 
 			RigidBody *rigidBodyA = GetEntityRigidBody(gameState, collision->entityA);
 			RigidBody *rigidBodyB = GetEntityRigidBody(gameState, collision->entityB);
@@ -795,145 +824,216 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			Transform *transformA = GetEntityTransform(gameState, collision->entityA);
 			Transform *transformB = GetEntityTransform(gameState, collision->entityB);
 
-			v3 hitNormal = collision->hitNormal;
-			v3 localHitPointA = collision->hitPoint - transformA->translation;
-			v3 localHitPointB = collision->hitPoint - transformB->translation;
+			f32 invHitCount = 1.0f / (f32)collision->hitCount;
+			//f32 invHitCount = 1.0f / ((f32)collision->hitCount + (f32)(collision->hitCount - 1) * 0.3f);
+			// @Hack
+			invHitCount = 1.0f;
 
-			v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, localHitPointA);
-			v3 velAtHitPointA = rigidBodyA->velocity + angVelAtHitPointA;
-
-			v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, localHitPointB);
-			v3 velAtHitPointB = rigidBodyB->velocity + angVelAtHitPointB;
-
-			v3 relVelAtHitPoint = velAtHitPointA - velAtHitPointB;
-
-			f32 speedAlongHitNormal = V3Dot(relVelAtHitPoint, hitNormal);
-			if (speedAlongHitNormal > 0)
-				continue;
-			v3 impulseVector = hitNormal * speedAlongHitNormal;
-
-			f32 restitution = Min(rigidBodyA->restitution, rigidBodyB->restitution);
-
-			// Impulse scalar
-			f32 impulseScalar = -(1.0f + restitution);
+			for (int hitIdx = 0; hitIdx < collision->hitCount; ++hitIdx)
 			{
-				mat4 RA = Mat4FromQuaternion(transformA->rotation);
-				mat4 noRA = Mat4Transpose(RA);
-				mat4 worldInvMomentOfInertiaA = Mat4Multiply(Mat4Multiply(RA,
-							rigidBodyA->invMomentOfInertiaTensor), noRA);
+				//if (collision->hitDepths[hitIdx] < 0.0f)
+					//continue;
+				// @Hack
+				if (hitIdx > 0) continue;
 
-				mat4 RB = Mat4FromQuaternion(transformB->rotation);
-				mat4 noRB = Mat4Transpose(RB);
-				mat4 worldInvMomentOfInertiaB = Mat4Multiply(Mat4Multiply(RB,
-							rigidBodyB->invMomentOfInertiaTensor), noRB);
+				v3 hit = collision->hitPoints[hitIdx];
+				v3 hitNormal = collision->hitNormal;
+				v3 localHitPointA = hit - transformA->translation;
+				v3 localHitPointB = hit - transformB->translation;
 
-				v3 armCrossNormalA = V3Cross(localHitPointA, hitNormal);
-				v3 armCrossNormalB = V3Cross(localHitPointB, hitNormal);
+				v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, localHitPointA);
+				v3 velAtHitPointA = rigidBodyA->velocity + angVelAtHitPointA;
 
-				impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass +
-					V3Dot(V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaA,
-						armCrossNormalA), localHitPointA), hitNormal) +
-					V3Dot(V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaB,
-						armCrossNormalB), localHitPointB), hitNormal);
+				v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, localHitPointB);
+				v3 velAtHitPointB = rigidBodyB->velocity + angVelAtHitPointB;
+
+				v3 relVelAtHitPoint = velAtHitPointA - velAtHitPointB;
+
+				f32 speedAlongHitNormal = V3Dot(relVelAtHitPoint, hitNormal);
+				if (speedAlongHitNormal > 0)
+					continue;
+
+				f32 restitution = Min(rigidBodyA->restitution, rigidBodyB->restitution);
+
+				// Impulse scalar
+				f32 impulseScalar = -(1.0f + restitution) * speedAlongHitNormal * invHitCount;
+				{
+					mat4 RA = Mat4FromQuaternion(transformA->rotation);
+					mat4 noRA = Mat4Transpose(RA);
+					mat4 worldInvMomentOfInertiaA = Mat4Multiply(Mat4Multiply(RA,
+								rigidBodyA->invMomentOfInertiaTensor), noRA);
+
+					mat4 RB = Mat4FromQuaternion(transformB->rotation);
+					mat4 noRB = Mat4Transpose(RB);
+					mat4 worldInvMomentOfInertiaB = Mat4Multiply(Mat4Multiply(RB,
+								rigidBodyB->invMomentOfInertiaTensor), noRB);
+
+					v3 armCrossNormalA = V3Cross(localHitPointA, hitNormal);
+					v3 armCrossNormalB = V3Cross(localHitPointB, hitNormal);
+
+					impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass + V3Dot(
+						V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaA,
+							armCrossNormalA), localHitPointA) +
+						V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaB,
+							armCrossNormalB), localHitPointB), hitNormal);
+				}
+				v3 impulseVector = hitNormal * impulseScalar;
+
+				// Store normal impulse scalar to calculate friction
+				collision->normalImpulseMags[hitIdx] = impulseScalar;
+
+				v3 force = impulseVector / deltaTime;
+
+				rigidBodyA->totalForce += force;
+				rigidBodyB->totalForce -= force;
+
+				v3 torque;
+				torque = V3Cross(localHitPointA, impulseVector) / deltaTime;
+				rigidBodyA->totalTorque += torque;
+				torque = V3Cross(localHitPointB, impulseVector) / deltaTime;
+				rigidBodyB->totalTorque -= torque;
+
+				rigidBodyA->lastFrameForces += force;
+				rigidBodyB->lastFrameForces -= force;
+				rigidBodyA->lastFrameTorque += torque;
+				rigidBodyB->lastFrameTorque -= torque;
 			}
-			collision->normalImpulseMag = impulseScalar;
-			impulseVector *= impulseScalar;
-
-			v3 force = impulseVector / deltaTime;
-
-			rigidBodyA->totalForce += force;
-			rigidBodyB->totalForce -= force;
-
-			v3 torque;
-			torque = V3Cross(localHitPointA, impulseVector) / deltaTime;
-			rigidBodyA->totalTorque += torque;
-			torque = V3Cross(localHitPointB, impulseVector) / deltaTime;
-			rigidBodyB->totalTorque -= torque;
 		}
 
-		// Friction impulse
-		for (u32 collisionIdx = 0; collisionIdx < collisions.count; ++collisionIdx)
+#if 1
+		for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
 		{
-			const Collision* collision = &collisions[collisionIdx];
-			//if (collision->penetrationLength <= 0.0f)
-				//continue;
+			RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
+			Transform *transform = GetEntityTransform(gameState, rigidBody->entityHandle);
 
-			RigidBody *rigidBodyA = GetEntityRigidBody(gameState, collision->entityA);
-			RigidBody *rigidBodyB = GetEntityRigidBody(gameState, collision->entityB);
-			bool hasRigidBodyA = rigidBodyA != nullptr;
-			bool hasRigidBodyB = rigidBodyB != nullptr;
+			rigidBody->velocity += rigidBody->totalForce * rigidBody->invMass * deltaTime;
 
-			if (!hasRigidBodyA && !hasRigidBodyB)
-				continue;
+			mat4 R = Mat4FromQuaternion(transform->rotation);
+			mat4 noR = Mat4Transpose(R);
+			mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, rigidBody->invMomentOfInertiaTensor), noR);
 
-			if (!rigidBodyA) rigidBodyA = &RIGID_BODY_STATIC;
-			if (!rigidBodyB) rigidBodyB = &RIGID_BODY_STATIC;
+			v3 angularAcceleration = Mat4TransformDirection(worldInvMomentOfInertia,
+					rigidBody->totalTorque);
+			rigidBody->angularVelocity += angularAcceleration * deltaTime;
 
-			Transform *transformA = GetEntityTransform(gameState, collision->entityA);
-			Transform *transformB = GetEntityTransform(gameState, collision->entityB);
+			rigidBody->totalForce = { 0, 0, 0 };
+			rigidBody->totalTorque = { 0, 0, 0 };
+		}
+#endif
 
-			v3 hitNormal = collision->hitNormal;
-			v3 localHitPointA = collision->hitPoint - transformA->translation;
-			v3 localHitPointB = collision->hitPoint - transformB->translation;
-
-			v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, localHitPointA);
-			v3 velAtHitPointA = rigidBodyA->velocity + angVelAtHitPointA;
-
-			v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, localHitPointB);
-			v3 velAtHitPointB = rigidBodyB->velocity + angVelAtHitPointB;
-
-			v3 relVelAtHitPoint = velAtHitPointA - velAtHitPointB;
-
-			f32 speedAlongHitNormal = V3Dot(relVelAtHitPoint, hitNormal);
-			if (speedAlongHitNormal > 0)
-				continue;
-
-			v3 tangent = relVelAtHitPoint - hitNormal * speedAlongHitNormal;
-			if (V3EqualWithEpsilon(tangent, {}, 0.00001f))
-				continue;
-			tangent = V3Normalize(tangent);
-
-			f32 staticFriction  = (rigidBodyA->staticFriction  + rigidBodyB->staticFriction)  * 0.5f;
-			f32 dynamicFriction = (rigidBodyA->dynamicFriction + rigidBodyB->dynamicFriction) * 0.5f;
-
-			// Impulse scalar
-			f32 impulseScalar = -V3Dot(relVelAtHitPoint, tangent);
+		// Friction impulse
+		if (!g_debugContext->disableFriction)
+		{
+			for (u32 collisionIdx = 0; collisionIdx < collisions.count; ++collisionIdx)
 			{
-				mat4 RA = Mat4FromQuaternion(transformA->rotation);
-				mat4 noRA = Mat4Transpose(RA);
-				mat4 worldInvMomentOfInertiaA = Mat4Multiply(Mat4Multiply(RA,
-							rigidBodyA->invMomentOfInertiaTensor), noRA);
+				const Collision* collision = &collisions[collisionIdx];
 
-				mat4 RB = Mat4FromQuaternion(transformB->rotation);
-				mat4 noRB = Mat4Transpose(RB);
-				mat4 worldInvMomentOfInertiaB = Mat4Multiply(Mat4Multiply(RB,
-							rigidBodyB->invMomentOfInertiaTensor), noRB);
+				RigidBody *rigidBodyA = GetEntityRigidBody(gameState, collision->entityA);
+				RigidBody *rigidBodyB = GetEntityRigidBody(gameState, collision->entityB);
+				bool hasRigidBodyA = rigidBodyA != nullptr;
+				bool hasRigidBodyB = rigidBodyB != nullptr;
 
-				v3 armCrossTangentA = V3Cross(localHitPointA, tangent);
-				v3 armCrossTangentB = V3Cross(localHitPointB, tangent);
+				if (!hasRigidBodyA && !hasRigidBodyB)
+					continue;
 
-				impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass +
-					V3Dot(V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaA,
-						armCrossTangentA), localHitPointA), tangent) +
-					V3Dot(V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaB,
-						armCrossTangentB), localHitPointB), tangent);
+				if (!rigidBodyA) rigidBodyA = &RIGID_BODY_STATIC;
+				if (!rigidBodyB) rigidBodyB = &RIGID_BODY_STATIC;
+
+				Transform *transformA = GetEntityTransform(gameState, collision->entityA);
+				Transform *transformB = GetEntityTransform(gameState, collision->entityB);
+
+				v3 hitNormal = collision->hitNormal;
+				f32 invHitCount = 1.0f / (f32)collision->hitCount;
+
+				for (int hitIdx = 0; hitIdx < collision->hitCount; ++hitIdx)
+				{
+					//if (collision->hitDepths[hitIdx] < 0.0f)
+						//continue;
+
+					v3 hit = collision->hitPoints[hitIdx];
+					v3 localHitPointA = hit - transformA->translation;
+					v3 localHitPointB = hit - transformB->translation;
+
+					v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, localHitPointA);
+					v3 velAtHitPointA = rigidBodyA->velocity + angVelAtHitPointA;
+
+					v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, localHitPointB);
+					v3 velAtHitPointB = rigidBodyB->velocity + angVelAtHitPointB;
+
+					v3 relVelAtHitPoint = velAtHitPointA - velAtHitPointB;
+
+					DrawDebugArrow(hit, hit + relVelAtHitPoint * 10.0f, {1,0,1});
+
+					f32 speedAlongHitNormal = V3Dot(relVelAtHitPoint, hitNormal);
+
+					v3 tangent = relVelAtHitPoint - hitNormal * speedAlongHitNormal;
+					if (V3EqualWithEpsilon(tangent, {}, 0.00001f))
+						continue;
+					tangent = V3Normalize(tangent);
+
+					DrawDebugArrow(hit, hit + tangent, {0,0,1});
+
+					f32 staticFriction  = (rigidBodyA->staticFriction  + rigidBodyB->staticFriction)  * 0.5f;
+					f32 dynamicFriction = (rigidBodyA->dynamicFriction + rigidBodyB->dynamicFriction) * 0.5f;
+
+					// Impulse scalar
+					f32 impulseScalar = -V3Dot(relVelAtHitPoint, tangent) * invHitCount;
+					{
+						mat4 RA = Mat4FromQuaternion(transformA->rotation);
+						mat4 noRA = Mat4Transpose(RA);
+						mat4 worldInvMomentOfInertiaA = Mat4Multiply(Mat4Multiply(RA,
+									rigidBodyA->invMomentOfInertiaTensor), noRA);
+
+						mat4 RB = Mat4FromQuaternion(transformB->rotation);
+						mat4 noRB = Mat4Transpose(RB);
+						mat4 worldInvMomentOfInertiaB = Mat4Multiply(Mat4Multiply(RB,
+									rigidBodyB->invMomentOfInertiaTensor), noRB);
+
+						v3 armCrossTangentA = V3Cross(localHitPointA, tangent);
+						v3 armCrossTangentB = V3Cross(localHitPointB, tangent);
+
+						v3 crossA = V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaA,
+								armCrossTangentA), localHitPointA);
+						v3 crossB = V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaB,
+								armCrossTangentB), localHitPointB);
+
+						impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass +
+							V3Dot(crossA + crossB, tangent);
+					}
+
+					f32 normalImpulseMag = collision->normalImpulseMags[hitIdx];
+					// @Hack
+					normalImpulseMag = collision->normalImpulseMags[0];
+					ASSERT(normalImpulseMag >= 0);
+					v3 impulseVector;
+					if (Abs(impulseScalar) <= normalImpulseMag * staticFriction)
+					{
+						impulseVector = tangent * impulseScalar;
+						DrawDebugArrow(hit, hit + impulseVector * 10.0f, {1,0,0});
+					}
+					else
+					{
+						impulseVector = tangent * -normalImpulseMag * dynamicFriction;
+						DrawDebugArrow(hit, hit + impulseVector * 10.0f, {0,1,0});
+					}
+
+					v3 force = impulseVector / deltaTime;
+
+					rigidBodyA->totalForce += force;
+					rigidBodyB->totalForce -= force;
+
+					v3 torque;
+					torque = V3Cross(localHitPointA, impulseVector) / deltaTime;
+					rigidBodyA->totalTorque += torque;
+					torque = V3Cross(localHitPointB, impulseVector) / deltaTime;
+					rigidBodyB->totalTorque -= torque;
+
+					rigidBodyA->lastFrameForces += force;
+					rigidBodyB->lastFrameForces -= force;
+					rigidBodyA->lastFrameTorque += torque;
+					rigidBodyB->lastFrameTorque -= torque;
+				}
 			}
-
-			if (Abs(impulseScalar) > collision->normalImpulseMag * staticFriction)
-				impulseScalar = collision->normalImpulseMag * dynamicFriction;
-
-			v3 impulseVector = tangent * impulseScalar;
-
-			v3 force = impulseVector / deltaTime;
-
-			rigidBodyA->totalForce += force;
-			rigidBodyB->totalForce -= force;
-
-			v3 torque;
-			torque = V3Cross(localHitPointA, impulseVector) / deltaTime;
-			rigidBodyA->totalTorque += torque;
-			torque = V3Cross(localHitPointB, impulseVector) / deltaTime;
-			rigidBodyB->totalTorque -= torque;
 		}
 
 		// Depenetrate
@@ -942,7 +1042,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			for (u32 collisionIdx = 0; collisionIdx < collisions.count; ++collisionIdx)
 			{
 				const Collision* collision = &collisions[collisionIdx];
-				if (collision->penetrationLength <= 0.0f)
+				if (collision->depth <= 0.0f)
 					continue;
 
 				RigidBody *rigidBodyA = GetEntityRigidBody(gameState, collision->entityA);
@@ -952,9 +1052,9 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				Transform *transformB = GetEntityTransform(gameState, collision->entityB);
 
 				if (rigidBodyA)
-					transformA->translation += collision->hitNormal * collision->penetrationLength;
+					transformA->translation += collision->hitNormal * collision->depth;
 				if (rigidBodyB)
-					transformB->translation -= collision->hitNormal * collision->penetrationLength;
+					transformB->translation -= collision->hitNormal * collision->depth;
 			}
 		}
 
@@ -965,14 +1065,13 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			{
 				RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
 				Transform *transform = GetEntityTransform(gameState, rigidBody->entityHandle);
-				ASSERT(transform); // There should never be an orphaned rigid body.
+
+				rigidBody->velocity += rigidBody->totalForce * rigidBody->invMass * deltaTime;
+				transform->translation += rigidBody->velocity * deltaTime;
 
 				mat4 R = Mat4FromQuaternion(transform->rotation);
 				mat4 noR = Mat4Transpose(R);
 				mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, rigidBody->invMomentOfInertiaTensor), noR);
-
-				rigidBody->velocity += rigidBody->totalForce * rigidBody->invMass * deltaTime;
-				transform->translation += rigidBody->velocity * deltaTime;
 
 				v3 angularAcceleration = Mat4TransformDirection(worldInvMomentOfInertia,
 						rigidBody->totalTorque);
@@ -987,11 +1086,11 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 					transform->rotation = V4Normalize(transform->rotation);
 				}
 
-				rigidBody->totalForce = { 0, 0, -9.8f };
+				rigidBody->totalForce = { 0, 0, 0 };
 				rigidBody->totalTorque = { 0, 0, 0 };
 
-				f32 drag = 0.1f;
-				f32 angularDrag = 0.1f;
+				f32 drag = 0.02f;
+				f32 angularDrag = 0.15f;
 				rigidBody->velocity -= rigidBody->velocity * deltaTime * drag;
 				rigidBody->angularVelocity -= rigidBody->angularVelocity * deltaTime * angularDrag;
 			}
@@ -1007,7 +1106,10 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			}
 			g_debugContext->resetMomenta = false;
 		}
+	}
 
+	// Update editor
+	{
 		// Move camera
 		if (controller->mouseRight.endedDown)
 		{

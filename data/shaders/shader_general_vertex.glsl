@@ -13,7 +13,7 @@ out vec4 lightSpaceVertex;
 void main()
 {
 	gl_Position = projection * view * model * vec4(pos, 1.0);
-	normal = (model * vec4(nor, 0.0)).xyz;
+	normal = normalize((model * vec4(nor, 0.0)).xyz);
 	uv = vec2(inUv.x, -inUv.y);
 	lightSpaceVertex = lightSpaceMatrix * model * vec4(pos, 1.0);
 }

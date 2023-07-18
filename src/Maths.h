@@ -798,9 +798,9 @@ inline v3 Mat4TransformPoint(const mat4 &m, const v3 &v)
 inline v3 Mat4TransformDirection(const mat4 &m, const v3 &v)
 {
 	v3 result;
-	result.x = v.x * m.m00 + v.y * m.m10 + v.z;
-	result.y = v.x * m.m01 + v.y * m.m11 + v.z;
-	result.z = v.x * m.m02 + v.y * m.m12 + v.z;
+	result.x = v.x * m.m00 + v.y * m.m10 + v.z * m.m20;
+	result.y = v.x * m.m01 + v.y * m.m11 + v.z * m.m21;
+	result.z = v.x * m.m02 + v.y * m.m12 + v.z * m.m22;
 	return result;
 }
 
@@ -827,6 +827,11 @@ inline mat4 Mat4FromQuaternion(const v4 &q)
 	result.m32 = 0;
 	result.m33 = 1;
 	return result;
+}
+
+inline v4 QuaternionConjugate(const v4& q)
+{
+	return { -q.x, -q.y, -q.z, q.w };
 }
 
 inline v4 QuaternionFromRotationMatrix(const mat4 &m)
@@ -1044,6 +1049,38 @@ inline mat4 Mat4ChangeOfBases(const v3 &fw, const v3 &up, const v3 &pos)
 	return result;
 }
 
+inline v3 TransformPoint(const Transform &t, const v3 &point)
+{
+	v3 result = point;
+	result.x *= t.scale.x;
+	result.y *= t.scale.y;
+	result.z *= t.scale.z;
+	result = QuaternionRotateVector(t.rotation, result);
+	result += t.translation;
+	return result;
+}
+
+inline v3 ReverseTransformPoint(const Transform &t, const v3 &point)
+{
+	v3 result = point;
+	result -= t.translation;
+	result = QuaternionRotateVector(QuaternionConjugate(t.rotation), result);
+	result.x /= t.scale.x;
+	result.y /= t.scale.y;
+	result.z /= t.scale.z;
+	return result;
+}
+
+inline v3 TransformDirection(const Transform &t, const v3 &direction)
+{
+	return QuaternionRotateVector(t.rotation, direction);
+}
+
+inline v3 ReverseTransformDirection(const Transform &t, const v3 &direction)
+{
+	return QuaternionRotateVector(QuaternionConjugate(t.rotation), direction);
+}
+
 // NOTE: a happens before b!
 inline Transform TransformChain(const Transform &a, const Transform &b)
 {
@@ -1053,3 +1090,89 @@ inline Transform TransformChain(const Transform &a, const Transform &b)
 	result.scale = V3Scale(a.scale, b.scale);
 	return result;
 }
+
+#if IS_MSVC
+// Retarded compiler
+inline constexpr u32 CountOnesConstexpr(u32 n)
+{
+	u32 count = 0;
+	u32 bit = 1;
+	for (int i = 0; i < 32; ++i)
+	{
+		if (n & bit) ++count;
+		n <<= 1;
+	}
+	return count;
+}
+
+inline constexpr u64 CountOnes64Constexpr(u64 n)
+{
+	u64 count = 0;
+	u64 bit = 1;
+	for (int i = 0; i < 64; ++i)
+	{
+		if (n & bit) ++count;
+		n <<= 1;
+	}
+	return count;
+}
+
+inline constexpr u8 NlzConstexpr(u32 n)
+{
+	u8 count = 0;
+	for (int i = 0; i < 32; ++i)
+	{
+		if (n & 0x80000000)
+			break;
+		n <<= 1;
+		++count;
+	}
+	return count;
+}
+
+inline constexpr u8 NtzConstexpr(u32 n)
+{
+	u8 count = 0;
+	for (int i = 0; i < 32; ++i)
+	{
+		if (n & 1)
+			break;
+		n >>= 1;
+		++count;
+	}
+	return count;
+}
+
+inline constexpr u8 Nlz64Constexpr(u64 n)
+{
+	u8 count = 0;
+	for (int i = 0; i < 64; ++i)
+	{
+		if (n & 0x8000000000000000)
+			break;
+		n <<= 1;
+		++count;
+	}
+	return count;
+}
+
+inline constexpr u8 Ntz64Constexpr(u64 n)
+{
+	u8 count = 0;
+	for (int i = 0; i < 64; ++i)
+	{
+		if (n & 1)
+			break;
+		n >>= 1;
+		++count;
+	}
+	return count;
+}
+#else
+#define CountOnesConstexpr CountOnes
+#define CountOnes64Constexpr CountOnes64
+#define NlzConstexpr Nlz
+#define Nlz64Constexpr Nlz64
+#define NtzConstexpr Ntz
+#define Ntz64Constexpr Ntz64
+#endif

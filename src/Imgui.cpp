@@ -12,6 +12,8 @@ void ImguiShowDebugWindow(GameState *gameState)
 
 	ImGui::Checkbox("Local", &g_debugContext->editRelative);
 
+	ImGui::Checkbox("Pause updates", &g_debugContext->pauseUpdates);
+
 	if (ImGui::CollapsingHeader("Memory usage"))
 	{
 		static f32 frameMemSamples[32];
@@ -43,6 +45,7 @@ void ImguiShowDebugWindow(GameState *gameState)
 	{
 		ImGui::Checkbox("Pause physics", &g_debugContext->pausePhysics);
 		ImGui::Checkbox("Pause upon contact", &g_debugContext->pausePhysicsOnContact);
+		ImGui::Checkbox("Disable friction", &g_debugContext->disableFriction);
 		if (ImGui::Button("Reset momenta")) g_debugContext->resetMomenta = true;
 	}
 
