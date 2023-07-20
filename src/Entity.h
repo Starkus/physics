@@ -66,9 +66,6 @@ struct RigidBody
 	v3 totalForce;
 	v3 totalTorque;
 
-	v3 lastFrameForces;
-	v3 lastFrameTorque;
-
 	f32 invMass;
 	f32 restitution;
 	f32 staticFriction;

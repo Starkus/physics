@@ -46,7 +46,7 @@ void ImguiShowDebugWindow(GameState *gameState)
 		ImGui::Checkbox("Pause physics", &g_debugContext->pausePhysics);
 		ImGui::Checkbox("Pause upon contact", &g_debugContext->pausePhysicsOnContact);
 		ImGui::Checkbox("Disable friction", &g_debugContext->disableFriction);
-		if (ImGui::Button("Reset momenta")) g_debugContext->resetMomenta = true;
+		if (ImGui::Button("Reset momentum")) g_debugContext->resetMomentum = true;
 	}
 
 	if (ImGui::CollapsingHeader("Collision debug"))

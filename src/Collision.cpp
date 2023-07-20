@@ -78,6 +78,7 @@ void GenPolytopeMesh(ArrayView<EPAFace> polytope, DebugVertex *outputBuffer, int
 		if (normalSqrlen <= 0)
 			continue;
 		normal /= Sqrt(normalSqrlen);
+		v3 invNormal = v3{ 0.5f, 0.5f, 0.5f } - normal * 0.5f;
 		normal = normal * 0.5f + v3{ 0.5f, 0.5f, 0.5f };
 		outputBuffer[(*vertexCount)++] = { face->a.a, normal };
 		outputBuffer[(*vertexCount)++] = { face->b.a, normal };
@@ -87,10 +88,12 @@ void GenPolytopeMesh(ArrayView<EPAFace> polytope, DebugVertex *outputBuffer, int
 		outputBuffer[(*vertexCount)++] = { face->a.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->b.dif, normal };
 		outputBuffer[(*vertexCount)++] = { face->c.dif, normal };
+#endif
 
-		outputBuffer[(*vertexCount)++] = { face->a.a - face->a.dif, normal };
-		outputBuffer[(*vertexCount)++] = { face->b.a - face->b.dif, normal };
-		outputBuffer[(*vertexCount)++] = { face->c.a - face->c.dif, normal };
+#if 1
+		outputBuffer[(*vertexCount)++] = { face->a.a - face->a.dif, invNormal };
+		outputBuffer[(*vertexCount)++] = { face->b.a - face->b.dif, invNormal };
+		outputBuffer[(*vertexCount)++] = { face->c.a - face->c.dif, invNormal };
 #endif
 	}
 }
@@ -1592,10 +1595,6 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 			worldTriangle.normal = closestFeatureNor;
 	}
 
-	DrawDebugCubeAA(worldTriangle.a, 0.03f, {1,0.5f,1});
-	DrawDebugCubeAA(worldTriangle.b, 0.03f, {1,0.5f,1});
-	DrawDebugCubeAA(worldTriangle.c, 0.03f, {1,0.5f,1});
-
 	Triangle triangle = { closestFeature.a.dif, closestFeature.b.dif, closestFeature.c.dif };
 	triangle.normal = closestFeatureNor;
 	v3 hit;
@@ -1603,9 +1602,6 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 
 	v3 bary = BarycentricCoordinates(&triangle, hit);
 	v3 hitWorldSpace = worldTriangle.a * bary.x + worldTriangle.b * bary.y + worldTriangle.c * bary.z;
-	//hitWorldSpace -= closestFeatureNor * result.depth;
-	//DrawDebugCubeAA(hitWorldSpace, 0.04f, {0,0,1});
-	//DrawDebugCubeAA(hitWorldSpace - closestFeatureNor * result.depth, 0.04f, {0,0,1});
 
 	result.hitPoints[0] = hitWorldSpace;
 	result.hitDepths[0] = result.depth;
@@ -1632,7 +1628,7 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 		v3 distVec = worldB - worldA;
 		f32 normalDist = V3Dot(distVec, result.hitNormal);
 #if 1
-		if (!EqualWithEpsilon(normalDist, 0, 0.03f))
+		if (!EqualWithEpsilon(normalDist, 0, 0.015f))
 		{
 			(*cache)[i] = (*cache)[--cache->count];
 			continue;
@@ -1640,7 +1636,7 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 #endif
 #if 1
 		f32 tangSqrDist = V3SqrLen(distVec - result.hitNormal * normalDist);
-		if (tangSqrDist > 0.03f)
+		if (tangSqrDist > 0.011f)
 		{
 			(*cache)[i] = (*cache)[--cache->count];
 			continue;
@@ -1666,7 +1662,7 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 		v3 depthVec = hitA - worldA;
 		f32 depth = V3Dot(depthVec, result.hitNormal);
 		// Remove points that are not colliding anymore
-		if (depth < -0.03f)
+		if (depth < -0.001f)
 		{
 			(*cache)[i] = (*cache)[--cache->count];
 			continue;

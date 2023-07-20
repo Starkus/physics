@@ -88,7 +88,7 @@ struct DebugContext
 
 	bool pausePhysics;
 	bool pausePhysicsOnContact;
-	bool resetMomenta;
+	bool resetMomentum;
 
 	// Editor
 	EntityHandle selectedEntity = ENTITY_HANDLE_INVALID;
@@ -97,8 +97,6 @@ struct DebugContext
 	bool editRelative;
 
 	bool pauseUpdates;
-
-	EntityHandle debugArrows[4];
 
 	DeviceProgram editorSelectedProgram;
 	DeviceProgram editorGizmoProgram;
