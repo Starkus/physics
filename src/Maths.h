@@ -145,7 +145,7 @@ inline bool IsPowerOf264(u64 n)
 
 inline bool EqualWithEpsilon(f32 a, f32 b, f32 epsilon)
 {
-	return a > b - epsilon && a < b + epsilon;
+	return a >= b - epsilon && a <= b + epsilon;
 }
 
 inline f32 Pow(f32 n, f32 e)
@@ -321,6 +321,24 @@ const mat4 MAT4_IDENTITY =
 	0.0f,	1.0f,	0.0f,	0.0f,
 	0.0f,	0.0f,	1.0f,	0.0f,
 	0.0f,	0.0f,	0.0f,	1.0f
+};
+
+union mat3
+{
+	struct
+	{
+		f32 m00; f32 m01; f32 m02;
+		f32 m10; f32 m11; f32 m12;
+		f32 m20; f32 m21; f32 m22;
+	};
+	f32 m[9];
+};
+
+const mat3 MAT3_IDENTITY =
+{
+	1.0f,	0.0f,	0.0f,
+	0.0f,	1.0f,	0.0f,
+	0.0f,	0.0f,	1.0f
 };
 
 inline mat4 operator*(const mat4 &a, f32 b)
@@ -1012,17 +1030,12 @@ inline mat4 Mat4Compose(const v3 &translation, const v4 &rotation)
 
 inline mat4 Mat4Compose(const Transform &t)
 {
-	mat4 m;
-	m = Mat4FromQuaternion(t.rotation);
-	m.m00 *= t.scale.x;
-	m.m10 *= t.scale.x;
-	m.m20 *= t.scale.x;
-	m.m01 *= t.scale.y;
-	m.m11 *= t.scale.y;
-	m.m21 *= t.scale.y;
-	m.m02 *= t.scale.z;
-	m.m12 *= t.scale.z;
-	m.m22 *= t.scale.z;
+	mat4 m = {};
+	m.m00 = t.scale.x;
+	m.m11 = t.scale.y;
+	m.m22 = t.scale.z;
+	m.m33 = 1.0f;
+	m = Mat4Multiply(m, Mat4FromQuaternion(t.rotation));
 	m.m30 = t.translation.x;
 	m.m31 = t.translation.y;
 	m.m32 = t.translation.z;
@@ -1046,6 +1059,66 @@ inline mat4 Mat4ChangeOfBases(const v3 &fw, const v3 &up, const v3 &pos)
 		up2.x,		up2.y,		up2.z,		0.0f,
 		pos.x,		pos.y,		pos.z,		1.0f
 	};
+	return result;
+}
+
+inline mat3 Mat3Transpose(const mat3 &a)
+{
+	mat3 result;
+	result.m00 = a.m00;
+	result.m01 = a.m10;
+	result.m02 = a.m20;
+
+	result.m10 = a.m01;
+	result.m11 = a.m11;
+	result.m12 = a.m21;
+
+	result.m20 = a.m02;
+	result.m21 = a.m12;
+	result.m22 = a.m22;
+	return result;
+}
+
+inline mat3 Mat3Multiply(const mat3 &a, const mat3 &b)
+{
+	mat3 result;
+	result.m00 = a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20;
+	result.m01 = a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21;
+	result.m02 = a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22;
+
+	result.m10 = a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20;
+	result.m11 = a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21;
+	result.m12 = a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22;
+
+	result.m20 = a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20;
+	result.m21 = a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21;
+	result.m22 = a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22;
+	return result;
+}
+
+inline mat3 Mat3FromQuaternion(const v4 &q)
+{
+	mat3 result;
+	result.m00 = 1 - 2*q.y*q.y - 2*q.z*q.z;
+	result.m01 = 2*q.x*q.y + 2*q.z*q.w;
+	result.m02 = 2*q.x*q.z - 2*q.y*q.w;
+
+	result.m10 = 2*q.x*q.y - 2*q.z*q.w;
+	result.m11 = 1 - 2*q.x*q.x - 2*q.z*q.z;
+	result.m12 = 2*q.y*q.z + 2*q.x*q.w;
+
+	result.m20 = 2*q.x*q.z + 2*q.y*q.w;
+	result.m21 = 2*q.y*q.z - 2*q.x*q.w;
+	result.m22 = 1 - 2*q.x*q.x - 2*q.y*q.y;
+	return result;
+}
+
+inline v3 Mat3TransformVector(const mat3 &m, const v3 &v)
+{
+	v3 result;
+	result.x = v.x * m.m00 + v.y * m.m10 + v.z * m.m20;
+	result.y = v.x * m.m01 + v.y * m.m11 + v.z * m.m21;
+	result.z = v.x * m.m02 + v.y * m.m12 + v.z * m.m22;
 	return result;
 }
 

@@ -65,10 +65,14 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		Transform *transform = GetEntityTransform(gameState, rigidBody->entityHandle);
 		ASSERT(transform); // There should never be an orphaned rigid body.
 
-#if 1
 		// Gravity
 		rigidBody->velocity.z -= 9.8f * deltaTime;
-#endif
+
+		// Calculate world-space inverse moment of inertia tensors for each rigid body
+		mat3 R = Mat3FromQuaternion(transform->rotation);
+		mat3 noR = Mat3Transpose(R);
+		rigidBody->worldInvMomentOfInertiaTensor = Mat3Multiply(
+				Mat3Multiply(R, rigidBody->invMomentOfInertiaTensor), noR);
 	}
 
 	// Bounce impulse
@@ -96,13 +100,13 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		{
 			v3 hit = collision->hitPoints[hitIdx];
 			v3 hitNormal = collision->hitNormal;
-			v3 localHitPointA = hit - transformA->translation;
-			v3 localHitPointB = hit - transformB->translation;
+			v3 rA = hit - transformA->translation;
+			v3 rB = hit - transformB->translation;
 
-			v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, localHitPointA);
+			v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, rA);
 			v3 velAtHitPointA = rigidBodyA->velocity + angVelAtHitPointA;
 
-			v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, localHitPointB);
+			v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, rB);
 			v3 velAtHitPointB = rigidBodyB->velocity + angVelAtHitPointB;
 
 			v3 relVelAtHitPoint = velAtHitPointA - velAtHitPointB;
@@ -116,24 +120,14 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 			// Impulse scalar
 			f32 impulseScalar = -(1.0f + restitution) * speedAlongHitNormal;
 			{
-				mat4 RA = Mat4FromQuaternion(transformA->rotation);
-				mat4 noRA = Mat4Transpose(RA);
-				mat4 worldInvMomentOfInertiaA = Mat4Multiply(Mat4Multiply(RA,
-							rigidBodyA->invMomentOfInertiaTensor), noRA);
-
-				mat4 RB = Mat4FromQuaternion(transformB->rotation);
-				mat4 noRB = Mat4Transpose(RB);
-				mat4 worldInvMomentOfInertiaB = Mat4Multiply(Mat4Multiply(RB,
-							rigidBodyB->invMomentOfInertiaTensor), noRB);
-
-				v3 armCrossNormalA = V3Cross(localHitPointA, hitNormal);
-				v3 armCrossNormalB = V3Cross(localHitPointB, hitNormal);
+				v3 armCrossNormalA = V3Cross(rA, hitNormal);
+				v3 armCrossNormalB = V3Cross(rB, hitNormal);
 
 				impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass + V3Dot(
-					V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaA,
-						armCrossNormalA), localHitPointA) +
-					V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaB,
-						armCrossNormalB), localHitPointB), hitNormal);
+					V3Cross(Mat3TransformVector(rigidBodyA->worldInvMomentOfInertiaTensor,
+						armCrossNormalA), rA) +
+					V3Cross(Mat3TransformVector(rigidBodyB->worldInvMomentOfInertiaTensor,
+						armCrossNormalB), rB), hitNormal);
 			}
 			ASSERT(impulseScalar >= 0);
 			v3 impulseVector = hitNormal * impulseScalar;
@@ -149,9 +143,9 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 			rigidBodyB->totalForce -= force;
 
 			v3 torque;
-			torque = V3Cross(localHitPointA, impulseVector) / deltaTime;
+			torque = V3Cross(rA, impulseVector) / deltaTime;
 			rigidBodyA->totalTorque += torque;
-			torque = V3Cross(localHitPointB, impulseVector) / deltaTime;
+			torque = V3Cross(rB, impulseVector) / deltaTime;
 			rigidBodyB->totalTorque -= torque;
 		}
 	}
@@ -159,15 +153,10 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 	for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
 	{
 		RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
-		Transform *transform = GetEntityTransform(gameState, rigidBody->entityHandle);
 
 		rigidBody->velocity += rigidBody->totalForce * rigidBody->invMass * deltaTime;
 
-		mat4 R = Mat4FromQuaternion(transform->rotation);
-		mat4 noR = Mat4Transpose(R);
-		mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, rigidBody->invMomentOfInertiaTensor), noR);
-
-		v3 angularAcceleration = Mat4TransformDirection(worldInvMomentOfInertia,
+		v3 angularAcceleration = Mat3TransformVector(rigidBody->worldInvMomentOfInertiaTensor,
 				rigidBody->totalTorque);
 		rigidBody->angularVelocity += angularAcceleration * deltaTime;
 
@@ -201,13 +190,13 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 			for (int hitIdx = 0; hitIdx < collision->hitCount; ++hitIdx)
 			{
 				v3 hit = collision->hitPoints[hitIdx];
-				v3 localHitPointA = hit - transformA->translation;
-				v3 localHitPointB = hit - transformB->translation;
+				v3 rA = hit - transformA->translation;
+				v3 rB = hit - transformB->translation;
 
-				v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, localHitPointA);
+				v3 angVelAtHitPointA = V3Cross(rigidBodyA->angularVelocity, rA);
 				v3 velAtHitPointA = rigidBodyA->velocity + angVelAtHitPointA;
 
-				v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, localHitPointB);
+				v3 angVelAtHitPointB = V3Cross(rigidBodyB->angularVelocity, rB);
 				v3 velAtHitPointB = rigidBodyB->velocity + angVelAtHitPointB;
 
 				v3 relVelAtHitPoint = velAtHitPointA - velAtHitPointB;
@@ -215,9 +204,10 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 				f32 speedAlongHitNormal = V3Dot(relVelAtHitPoint, hitNormal);
 
 				v3 tangent = relVelAtHitPoint - hitNormal * speedAlongHitNormal;
-				if (V3EqualWithEpsilon(tangent, {}, 0.00001f))
+				f32 tangentSqrLen = V3SqrLen(tangent);
+				if (EqualWithEpsilon(tangentSqrLen, 0, 0.00001f))
 					continue;
-				tangent = V3Normalize(tangent);
+				tangent /= Sqrt(tangentSqrLen);
 
 				f32 staticFriction  = (rigidBodyA->staticFriction  + rigidBodyB->staticFriction)  * 0.5f;
 				f32 dynamicFriction = (rigidBodyA->dynamicFriction + rigidBodyB->dynamicFriction) * 0.5f;
@@ -225,23 +215,13 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 				// Impulse scalar
 				f32 impulseScalar = -V3Dot(relVelAtHitPoint, tangent);
 				{
-					mat4 RA = Mat4FromQuaternion(transformA->rotation);
-					mat4 noRA = Mat4Transpose(RA);
-					mat4 worldInvMomentOfInertiaA = Mat4Multiply(Mat4Multiply(RA,
-								rigidBodyA->invMomentOfInertiaTensor), noRA);
+					v3 armCrossTangentA = V3Cross(rA, tangent);
+					v3 armCrossTangentB = V3Cross(rB, tangent);
 
-					mat4 RB = Mat4FromQuaternion(transformB->rotation);
-					mat4 noRB = Mat4Transpose(RB);
-					mat4 worldInvMomentOfInertiaB = Mat4Multiply(Mat4Multiply(RB,
-								rigidBodyB->invMomentOfInertiaTensor), noRB);
-
-					v3 armCrossTangentA = V3Cross(localHitPointA, tangent);
-					v3 armCrossTangentB = V3Cross(localHitPointB, tangent);
-
-					v3 crossA = V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaA,
-							armCrossTangentA), localHitPointA);
-					v3 crossB = V3Cross(Mat4TransformDirection(worldInvMomentOfInertiaB,
-							armCrossTangentB), localHitPointB);
+					v3 crossA = V3Cross(Mat3TransformVector(rigidBodyA->worldInvMomentOfInertiaTensor,
+							armCrossTangentA), rA);
+					v3 crossB = V3Cross(Mat3TransformVector(rigidBodyB->worldInvMomentOfInertiaTensor,
+							armCrossTangentB), rB);
 
 					impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass +
 						V3Dot(crossA + crossB, tangent);
@@ -267,12 +247,82 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 				rigidBodyB->totalForce -= force;
 
 				v3 torque;
-				torque = V3Cross(localHitPointA, impulseVector) / deltaTime;
+				torque = V3Cross(rA, impulseVector) / deltaTime;
 				rigidBodyA->totalTorque += torque;
-				torque = V3Cross(localHitPointB, impulseVector) / deltaTime;
+				torque = V3Cross(rB, impulseVector) / deltaTime;
 				rigidBodyB->totalTorque -= torque;
 			}
 		}
+	}
+
+	// Springs
+	for (u32 springIdx = 0; springIdx < gameState->springs.count; ++springIdx)
+	{
+		Spring *spring = &gameState->springs[springIdx];
+		Transform *transformA = GetEntityTransform(gameState, spring->entityA);
+		if (!transformA) continue;
+		Transform *transformB = GetEntityTransform(gameState, spring->entityB);
+		if (!transformB) continue;
+
+		RigidBody *rigidBodyA = GetEntityRigidBody(gameState, spring->entityA);
+		RigidBody *rigidBodyB = GetEntityRigidBody(gameState, spring->entityB);
+		bool hasRigidBodyA = rigidBodyA != nullptr;
+		bool hasRigidBodyB = rigidBodyB != nullptr;
+
+		if (!hasRigidBodyA && !hasRigidBodyB)
+			continue;
+
+		if (!rigidBodyA) rigidBodyA = &RIGID_BODY_STATIC;
+		if (!rigidBodyB) rigidBodyB = &RIGID_BODY_STATIC;
+
+		// @Todo: this doesn't factor in scale
+		v3 rA = TransformDirection(*transformA, spring->offsetA);
+		v3 rB = TransformDirection(*transformB, spring->offsetB);
+
+		DrawDebugLine(transformA->translation + rA, transformB->translation + rB, { 0.9f, 0.9f, 0.9f });
+
+		v3 ab = (transformB->translation + rB) - (transformA->translation + rA);
+		f32 currentDistance = V3Length(ab);
+		v3 abDir = ab / currentDistance;
+
+		v3 angVelA = V3Cross(rigidBodyA->angularVelocity, rA);
+		v3 velA = rigidBodyA->velocity + angVelA;
+
+		v3 angVelB = V3Cross(rigidBodyB->angularVelocity, rB);
+		v3 velB = rigidBodyB->velocity + angVelB;
+
+		v3 relVel = velB - velA;
+		f32 relVelAlongSpring = V3Dot(relVel, abDir);
+
+		// Impulse scalar
+		f32 impulseScalar = (currentDistance - spring->distance) * spring->stiffness;
+		impulseScalar += relVelAlongSpring * spring->damping;
+		{
+			v3 armCrossNormalA = V3Cross(rA, abDir);
+			v3 armCrossNormalB = V3Cross(rB, abDir);
+
+			impulseScalar /= rigidBodyA->invMass + rigidBodyB->invMass + V3Dot(
+				V3Cross(Mat3TransformVector(rigidBodyA->worldInvMomentOfInertiaTensor,
+					armCrossNormalA), rA) +
+				V3Cross(Mat3TransformVector(rigidBodyB->worldInvMomentOfInertiaTensor,
+					armCrossNormalB), rB), abDir);
+		}
+
+		// Prevent explosions
+		impulseScalar = Min(impulseScalar, 20.0f);
+
+		v3 impulseVector = abDir * impulseScalar;
+
+		v3 force = impulseVector / deltaTime;
+
+		rigidBodyA->totalForce += force;
+		rigidBodyB->totalForce -= force;
+
+		v3 torque;
+		torque = V3Cross(rA, impulseVector) / deltaTime;
+		rigidBodyA->totalTorque += torque;
+		torque = V3Cross(rB, impulseVector) / deltaTime;
+		rigidBodyB->totalTorque -= torque;
 	}
 
 	// Depenetrate
@@ -304,7 +354,6 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		}
 	}
 
-	// Rigid bodies
 	for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
 	{
 		RigidBody *rigidBody = &gameState->rigidBodies[rigidBodyIdx];
@@ -313,11 +362,7 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		// Integrate velocities
 		rigidBody->velocity += rigidBody->totalForce * rigidBody->invMass * deltaTime;
 
-		mat4 R = Mat4FromQuaternion(transform->rotation);
-		mat4 noR = Mat4Transpose(R);
-		mat4 worldInvMomentOfInertia = Mat4Multiply(Mat4Multiply(R, rigidBody->invMomentOfInertiaTensor), noR);
-
-		v3 angularAcceleration = Mat4TransformDirection(worldInvMomentOfInertia,
+		v3 angularAcceleration = Mat3TransformVector(rigidBody->worldInvMomentOfInertiaTensor,
 				rigidBody->totalTorque);
 		rigidBody->angularVelocity += angularAcceleration * deltaTime;
 

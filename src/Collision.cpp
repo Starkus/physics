@@ -111,8 +111,7 @@ bool RayTriangleIntersection(v3 rayOrigin, v3 rayDir, bool infinite, const Trian
 	const v3 ca = a - c;
 
 	f32 rayDistAlongNormal = V3Dot(rayDir, -nor);
-	const f32 epsilon = 0.000001f;
-	if (rayDistAlongNormal > -epsilon && rayDistAlongNormal < epsilon)
+	if (EqualWithEpsilon(rayDistAlongNormal, 0, 0.000001f))
 		// Perpendicular
 		return false;
 
@@ -126,21 +125,30 @@ bool RayTriangleIntersection(v3 rayOrigin, v3 rayDir, bool infinite, const Trian
 
 	// Barycentric coordinates
 	{
-		const v3 projABOntoBC = bc * (V3Dot(ab, bc) / V3Dot(bc, bc));
+		f32 bcSqrLen = V3SqrLen(bc);
+		if (bcSqrLen == 0)
+			return false;
+		const v3 projABOntoBC = bc * (V3Dot(ab, bc) / bcSqrLen);
 		const v3 v = ab - projABOntoBC;
 		if (V3Dot(v, ab) < V3Dot(v, rayPlaneInt - a))
 			return false;
 	}
 
 	{
-		const v3 projBCOntoCA = ca * (V3Dot(bc, ca) / V3Dot(ca, ca));
+		f32 caSqrLen = V3SqrLen(ca);
+		if (caSqrLen == 0)
+			return false;
+		const v3 projBCOntoCA = ca * (V3Dot(bc, ca) / caSqrLen);
 		const v3 v = bc - projBCOntoCA;
 		if (V3Dot(v, bc) < V3Dot(v, rayPlaneInt - b))
 			return false;
 	}
 
 	{
-		const v3 projCAOntoAB = ab * (V3Dot(ca, ab) / V3Dot(ab, ab));
+		f32 abSqrLen = V3SqrLen(ab);
+		if (abSqrLen == 0)
+			return false;
+		const v3 projCAOntoAB = ab * (V3Dot(ca, ab) / abSqrLen);
 		const v3 v = ca - projCAOntoAB;
 		if (V3Dot(v, ca) < V3Dot(v, rayPlaneInt - c))
 			return false;
@@ -162,8 +170,7 @@ bool ProjectToTriangle(v3 rayOrigin, v3 rayDir, const Triangle *triangle, v3 *hi
 	const v3 ca = a - c;
 
 	f32 rayDistAlongNormal = V3Dot(rayDir, -nor);
-	const f32 epsilon = 0.000001f;
-	if (EqualWithEpsilon(rayDistAlongNormal, 0, epsilon))
+	if (EqualWithEpsilon(rayDistAlongNormal, 0, 0.000001f))
 		// Perpendicular
 		return false;
 
@@ -189,6 +196,7 @@ v3 BarycentricCoordinates(Triangle *triangle, v3 p)
 	float dot20 = V3Dot(AP, AB);
 	float dot21 = V3Dot(AP, AC);
 	float denom = dot00 * dot11 - dot01 * dot01;
+	ASSERT(denom != 0);
 	result.y = (dot11 * dot20 - dot01 * dot21) / denom;
 	result.z = (dot00 * dot21 - dot01 * dot20) / denom;
 	result.x = 1.0f - result.y - result.z;
@@ -206,6 +214,8 @@ bool HitTest_CheckCell(GameState *gameState, int cellX, int cellY, bool swapXY, 
 	}
 
 	const ResourceGeometryGrid *geometryGrid = &gameState->levelGeometry.geometryGrid->geometryGrid;
+	ASSERT(geometryGrid->cellsSide != 0);
+
 	v2 cellSize = (geometryGrid->highCorner - geometryGrid->lowCorner) / (f32)(geometryGrid->cellsSide);
 
 	if (cellX < 0 || cellX >= geometryGrid->cellsSide ||
@@ -309,6 +319,8 @@ bool HitTest_CheckCell(GameState *gameState, int cellX, int cellY, bool swapXY, 
 bool HitTest(GameState *gameState, v3 rayOrigin, v3 rayDir, bool infinite, v3 *hit, Triangle *triangle)
 {
 	const ResourceGeometryGrid *geometryGrid = &gameState->levelGeometry.geometryGrid->geometryGrid;
+	ASSERT(geometryGrid->cellsSide != 0);
+
 	v2 cellSize = (geometryGrid->highCorner - geometryGrid->lowCorner) / (f32)(geometryGrid->cellsSide);
 
 #if HITTEST_VISUAL_DEBUG
@@ -1636,19 +1648,21 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 #endif
 #if 1
 		f32 tangSqrDist = V3SqrLen(distVec - result.hitNormal * normalDist);
-		if (tangSqrDist > 0.011f)
+		if (tangSqrDist > 0.007f)
 		{
 			(*cache)[i] = (*cache)[--cache->count];
 			continue;
 		}
 #endif
 
+#if 1
 		// Remove points close to the new point
-		if (V3SqrLen(worldA - hitWorldSpace) < 0.05f)
+		if (V3SqrLen(worldA - hitWorldSpace) < 0.08f)
 		{
 			(*cache)[i] = (*cache)[--cache->count];
 			continue;
 		}
+#endif
 
 		v3 color = { f32(ii%2), f32((ii/2)%2), f32((ii/4)%2) };
 		++ii;
@@ -1662,7 +1676,7 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 		v3 depthVec = hitA - worldA;
 		f32 depth = V3Dot(depthVec, result.hitNormal);
 		// Remove points that are not colliding anymore
-		if (depth < -0.001f)
+		if (depth < -0.0008f)
 		{
 			(*cache)[i] = (*cache)[--cache->count];
 			continue;

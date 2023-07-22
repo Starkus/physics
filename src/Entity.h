@@ -17,6 +17,12 @@ inline bool operator!=(const EntityHandle &a, const EntityHandle &b)
 	return a.id != b.id && a.generation != b.generation;
 }
 
+struct MeshInstance
+{
+	EntityHandle entityHandle;
+	const Resource *meshRes;
+};
+
 enum ColliderType
 {
 	COLLIDER_CONVEX_HULL,
@@ -70,7 +76,9 @@ struct RigidBody
 	f32 restitution;
 	f32 staticFriction;
 	f32 dynamicFriction;
-	mat4 invMomentOfInertiaTensor;
+
+	mat3 invMomentOfInertiaTensor;
+	mat3 worldInvMomentOfInertiaTensor;
 };
 
 RigidBody RIGID_BODY_STATIC = {
@@ -86,8 +94,13 @@ RigidBody RIGID_BODY_STATIC = {
 	.invMomentOfInertiaTensor = {}
 };
 
-struct MeshInstance
+struct Spring
 {
-	EntityHandle entityHandle;
-	const Resource *meshRes;
+	EntityHandle entityA;
+	EntityHandle entityB;
+	v3 offsetA;
+	v3 offsetB;
+	f32 distance;
+	f32 stiffness;
+	f32 damping;
 };

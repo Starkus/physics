@@ -1,7 +1,7 @@
 struct String
 {
-	const char *data;
 	u64 size;
+	const char *data;
 };
 
 inline const char *StringToCStr(String *str, void *(*allocFunc)(u64))

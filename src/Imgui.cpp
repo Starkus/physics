@@ -102,3 +102,218 @@ void ImguiShowDebugWindow(GameState *gameState)
 	(void)gameState;
 #endif
 }
+
+void ImguiShowEntityTab(GameState *gameState)
+{
+	Transform *selectedEntity = GetEntityTransform(gameState, g_debugContext->selectedEntity);
+	if (!selectedEntity)
+		return;
+
+	ImGui::Text("Entity #%u:%hhu", g_debugContext->selectedEntity.id,
+			g_debugContext->selectedEntity.generation);
+
+	if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::DragFloat3("Position", selectedEntity->translation.v, 0.01f);
+		ImGui::DragFloat4("Rotation", selectedEntity->rotation.v, 0.01f);
+		ImGui::DragFloat3("Scale", selectedEntity->scale.v, 0.01f);
+	}
+
+	bool recalculateInersiaTensor = false;
+
+	Collider *collider = GetEntityCollider(gameState, g_debugContext->selectedEntity);
+	if (collider)
+	{
+		bool keep = true;
+		if (ImGui::CollapsingHeader("Collider", &keep, ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			static const char *typeNames[] = {
+				"Convex hull",
+				"Cube",
+				"Sphere",
+				"Cylinder",
+				"Capsule"
+			};
+
+			if (ImGui::BeginCombo("Type", typeNames[collider->type]))
+			{
+				for (int i = 0; i < ArrayCount(typeNames); i++)
+				{
+					const bool isSelected = i == collider->type;
+					if (ImGui::Selectable(typeNames[i], isSelected))
+					{
+						collider->type = (ColliderType)i;
+						recalculateInersiaTensor = true;
+					}
+
+					// Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+					if (isSelected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+
+			switch (collider->type)
+			{
+			case COLLIDER_CONVEX_HULL:
+				break;
+			case COLLIDER_CUBE:
+				if (ImGui::DragFloat("Radius", &collider->cube.radius, 0.01f))
+					recalculateInersiaTensor = true;
+				break;
+			case COLLIDER_SPHERE:
+				if (ImGui::DragFloat("Radius", &collider->sphere.radius, 0.01f))
+					recalculateInersiaTensor = true;
+				break;
+			case COLLIDER_CYLINDER:
+				if (ImGui::DragFloat("Radius", &collider->cylinder.radius, 0.01f))
+					recalculateInersiaTensor = true;
+				if (ImGui::DragFloat("Height", &collider->cylinder.height, 0.01f))
+					recalculateInersiaTensor = true;
+				break;
+			case COLLIDER_CAPSULE:
+				if (ImGui::DragFloat("Radius", &collider->capsule.radius, 0.01f))
+					recalculateInersiaTensor = true;
+				if (ImGui::DragFloat("Height", &collider->capsule.height, 0.01f))
+					recalculateInersiaTensor = true;
+				break;
+			}
+		}
+		if (!keep)
+		{
+			EntityRemoveCollider(gameState, g_debugContext->selectedEntity);
+		}
+	}
+	else
+	{
+		if (ImGui::Button("Add collider"))
+		{
+			collider = ArrayAdd(&gameState->colliders);
+			*collider = {};
+			collider->type = COLLIDER_CUBE;
+			collider->cube.radius = 1;
+			collider->cube.offset = {};
+			EntityAssignCollider(gameState, g_debugContext->selectedEntity, collider);
+		}
+	}
+
+	RigidBody *rigidBody = GetEntityRigidBody(gameState, g_debugContext->selectedEntity);
+	if (rigidBody)
+	{
+		bool keep = true;
+		if (ImGui::CollapsingHeader("Rigid body", &keep, ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			f32 mass = 1.0f / rigidBody->invMass;
+			if (ImGui::DragFloat("Mass", &mass, 0.01f) && mass > 0)
+			{
+				rigidBody->invMass = 1.0f / mass;
+				recalculateInersiaTensor = true;
+			}
+
+			ImGui::DragFloat("Restitution", &rigidBody->restitution, 0.01f);
+			ImGui::DragFloat("Static friction", &rigidBody->staticFriction, 0.01f);
+			ImGui::DragFloat("Dynamic friction", &rigidBody->dynamicFriction, 0.01f);
+		}
+		if (recalculateInersiaTensor)
+		{
+			rigidBody->invMomentOfInertiaTensor = CalculateInverseMomentOfInertiaTensor(*collider,
+					rigidBody->invMass);
+		}
+		if (!keep)
+		{
+			EntityRemoveRigidBody(gameState, g_debugContext->selectedEntity);
+		}
+	}
+	else
+	{
+		if (ImGui::Button("Add rigid body"))
+		{
+			rigidBody = ArrayAdd(&gameState->rigidBodies);
+			*rigidBody = {};
+			rigidBody->invMass = 1.0f;
+			rigidBody->restitution = 0.3f;
+			rigidBody->staticFriction = 0.4f;
+			rigidBody->dynamicFriction = 0.2f;
+			rigidBody->invMomentOfInertiaTensor = CalculateInverseMomentOfInertiaTensor(*collider,
+					rigidBody->invMass);
+			EntityAssignRigidBody(gameState, g_debugContext->selectedEntity, rigidBody);
+		}
+	}
+}
+
+bool ImguiGetSpringName(void *, int index, const char **name)
+{
+	*name = TPrintF("Spring #%d\0", index).data;
+	return true;
+}
+
+void ImguiShowSpringsTab(GameState *gameState)
+{
+	static int currentSpringIdx = 0;
+	if (ImGui::Button("Add"))
+		*ArrayAdd(&gameState->springs) = {};
+	ImGui::ListBox("Springs", &currentSpringIdx, ImguiGetSpringName, nullptr,
+			gameState->springs.count);
+
+	if (currentSpringIdx < 0 || currentSpringIdx >= (int)gameState->springs.count)
+		return;
+
+	Spring* currentSpring = &gameState->springs[currentSpringIdx];
+
+	int step = 1;
+	if (ImGui::InputScalar("Entity A", ImGuiDataType_U32, &currentSpring->entityA.id, &step))
+	{
+		currentSpring->entityA.generation = gameState->entityGenerations[currentSpring->entityA.id];
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Sel##A"))
+		currentSpring->entityA = g_debugContext->selectedEntity;
+
+	if (ImGui::InputScalar("Entity B", ImGuiDataType_U32, &currentSpring->entityB.id, &step))
+	{
+		currentSpring->entityB.generation = gameState->entityGenerations[currentSpring->entityB.id];
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Sel##B"))
+		currentSpring->entityB = g_debugContext->selectedEntity;
+
+	ImGui::DragFloat3("Offset A", currentSpring->offsetA.v, 0.01f);
+	ImGui::DragFloat3("Offset B", currentSpring->offsetB.v, 0.01f);
+
+	ImGui::DragFloat("Distance", &currentSpring->distance, 0.01f);
+	ImGui::DragFloat("Stiffness", &currentSpring->stiffness, 0.01f);
+	ImGui::DragFloat("Damping", &currentSpring->damping, 0.01f);
+}
+
+void ImguiShowPropertiesWindow(GameState *gameState)
+{
+#if DEBUG_BUILD && USING_IMGUI
+	ImGui::SetNextWindowPos(ImVec2(600, 340), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(315, 425), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Properties", nullptr, 0))
+	{
+		ImGui::End();
+		return;
+	}
+
+	if (ImGui::BeginTabBar("TabsBar"))
+	{
+		if (ImGui::BeginTabItem("Entity"))
+		{
+			ImguiShowEntityTab(gameState);
+			ImGui::EndTabItem();
+		}
+		if (ImGui::BeginTabItem("Springs"))
+		{
+			ImguiShowSpringsTab(gameState);
+			ImGui::EndTabItem();
+		}
+		ImGui::EndTabBar();
+	}
+
+	ImGui::End();
+#else
+	(void)gameState;
+#endif
+}

@@ -130,6 +130,8 @@ struct GameState
 	Array<Collider, TransientAllocator> colliders;
 	Array<RigidBody, TransientAllocator> rigidBodies;
 
+	Array<Spring, TransientAllocator> springs;
+
 	v3 lightPosition;
 	v3 lightDirection;
 

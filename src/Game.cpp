@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdarg.h>
 
+#define STB_SPRINTF_IMPLEMENTATION
+#include "stb/stb_sprintf.h"
+
 #if TARGET_WINDOWS && DEBUG_BUILD
 #define USING_IMGUI 1
 #endif
@@ -31,6 +34,20 @@
 #if DEBUG_BUILD
 DebugContext *g_debugContext;
 #endif
+
+String TPrintF(const char *format, ...)
+{
+	char *buffer = (char *)g_memory->framePtr;
+
+	va_list args;
+	va_start(args, format);
+	u64 size = stbsp_vsprintf(buffer, format, args);
+	va_end(args);
+
+	g_memory->framePtr = (u8 *)g_memory->framePtr + size + 1;
+
+	return { size, buffer };
+}
 
 #include "DebugDraw.cpp"
 #include "Collision.cpp"
@@ -156,6 +173,7 @@ void StartGame()
 	ArrayInit(&gameState->meshInstances, 4096);
 	ArrayInit(&gameState->colliders, 4096);
 	ArrayInit(&gameState->rigidBodies, 4096);
+	ArrayInit(&gameState->springs, 1024);
 	HashMapInit(&gameState->hitPointCache, 256);
 
 	// @Hack: Hmmm
@@ -332,6 +350,12 @@ void StartGame()
 		*collider = teapotCollider;
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
+		Spring *spring = ArrayAdd(&gameState->springs);
+		*spring = {};
+		spring->distance = 4.0f;
+		spring->stiffness = 5.0f;
+		spring->damping = 0.4f;
+
 		const Resource *cubeRes = GetResource("cube.b");
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { 3.0f, 5.0f, 4.0f };
@@ -350,19 +374,10 @@ void StartGame()
 		rigidBody->restitution = 0.3f;
 		rigidBody->staticFriction = 0.4f;
 		rigidBody->dynamicFriction = 0.2f;
-		{
-			// Moment of inertia of 2m^3, 1kg cube
-			f32 r2 = collider->cube.radius * 2;
-			f32 s = ((1.0f/rigidBody->invMass)/6.0f) * (r2 * r2);
-			f32 invs = 1.0f/s;
-			rigidBody->invMomentOfInertiaTensor = {
-				invs,	0,		0,		0,
-				0,		invs,	0,		0,
-				0,		0,		invs,	0,
-				0,		0,		0,		0
-			};
-		}
+		rigidBody->invMomentOfInertiaTensor = CalculateInverseMomentOfInertiaTensor(*collider,
+				rigidBody->invMass);
 		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
+		spring->entityA = testEntityHandle;
 
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -3.0f, 5.0f, 1.0f };
@@ -440,18 +455,16 @@ void StartGame()
 		collider->cylinder.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 
-#if 1
 		testEntityHandle = AddEntity(gameState, &transform);
 		transform->translation = { -3.0f, 5.0f, 5.0f };
 		transform->rotation = QUATERNION_IDENTITY;
 		meshInstance = ArrayAdd(&gameState->meshInstances);
-		meshInstance->meshRes = cylinderRes;
+		meshInstance->meshRes = sphereRes;
 		EntityAssignMesh(gameState, testEntityHandle, meshInstance);
 		collider = ArrayAdd(&gameState->colliders);
-		collider->type = COLLIDER_CYLINDER;
-		collider->cylinder.radius = 1;
-		collider->cylinder.height = 2;
-		collider->cylinder.offset = {};
+		collider->type = COLLIDER_SPHERE;
+		collider->sphere.radius = 1;
+		collider->sphere.offset = {};
 		EntityAssignCollider(gameState, testEntityHandle, collider);
 		rigidBody = ArrayAdd(&gameState->rigidBodies);
 		*rigidBody = {};
@@ -459,22 +472,10 @@ void StartGame()
 		rigidBody->restitution = 0.3f;
 		rigidBody->staticFriction = 0.4f;
 		rigidBody->dynamicFriction = 0.2f;
-		{
-			f32 mass = 1.0f/rigidBody->invMass;
-			f32 s = (mass/12.0f) * (collider->cylinder.height * collider->cylinder.height) +
-					(mass/4.0f)  * (collider->cylinder.radius * collider->cylinder.radius);
-			f32 invs = 1.0f/s;
-			f32 z = (mass/2.0f)  * (collider->cylinder.radius * collider->cylinder.radius);
-			f32 invz = 1.0f/z;
-			rigidBody->invMomentOfInertiaTensor = {
-				invs,	0,		0,		0,
-				0,		invs,	0,		0,
-				0,		0,		invz,	0,
-				0,		0,		0,		0
-			};
-		}
+		rigidBody->invMomentOfInertiaTensor = CalculateInverseMomentOfInertiaTensor(*collider,
+				rigidBody->invMass);
 		EntityAssignRigidBody(gameState, testEntityHandle, rigidBody);
-#endif
+		spring->entityB = testEntityHandle;
 
 		const Resource *capsuleRes = GetResource("capsule.b");
 		testEntityHandle = AddEntity(gameState, &transform);
@@ -689,6 +690,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 #endif
 
 	ImguiShowDebugWindow(gameState);
+	ImguiShowPropertiesWindow(gameState);
 #endif
 
 	if (deltaTime < 0 || deltaTime > 1)
