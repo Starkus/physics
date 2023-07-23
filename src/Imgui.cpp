@@ -1,4 +1,4 @@
-void ImguiShowDebugWindow(GameState *gameState)
+void ImguiShowDebugWindow(GameState *gameState, f32 frameTime)
 {
 #if DEBUG_BUILD && USING_IMGUI
 	ImGui::SetNextWindowPos(ImVec2(8, 340), ImGuiCond_FirstUseEver);
@@ -10,7 +10,9 @@ void ImguiShowDebugWindow(GameState *gameState)
 		return;
 	}
 
-	ImGui::Checkbox("Local", &g_debugContext->editRelative);
+	ImGui::Text("Frame time: %f", frameTime);
+
+	ImGui::Checkbox("Local", &g_editorContext->editRelative);
 
 	ImGui::Checkbox("Pause updates", &g_debugContext->pauseUpdates);
 
@@ -105,12 +107,12 @@ void ImguiShowDebugWindow(GameState *gameState)
 
 void ImguiShowEntityTab(GameState *gameState)
 {
-	Transform *selectedEntity = GetEntityTransform(gameState, g_debugContext->selectedEntity);
+	Transform *selectedEntity = GetEntityTransform(gameState, g_editorContext->selectedEntity);
 	if (!selectedEntity)
 		return;
 
-	ImGui::Text("Entity #%u:%hhu", g_debugContext->selectedEntity.id,
-			g_debugContext->selectedEntity.generation);
+	ImGui::Text("Entity #%u:%hhu", g_editorContext->selectedEntity.id,
+			g_editorContext->selectedEntity.generation);
 
 	if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
 	{
@@ -121,7 +123,7 @@ void ImguiShowEntityTab(GameState *gameState)
 
 	bool recalculateInersiaTensor = false;
 
-	Collider *collider = GetEntityCollider(gameState, g_debugContext->selectedEntity);
+	Collider *collider = GetEntityCollider(gameState, g_editorContext->selectedEntity);
 	if (collider)
 	{
 		bool keep = true;
@@ -181,7 +183,7 @@ void ImguiShowEntityTab(GameState *gameState)
 		}
 		if (!keep)
 		{
-			EntityRemoveCollider(gameState, g_debugContext->selectedEntity);
+			EntityRemoveCollider(gameState, g_editorContext->selectedEntity);
 		}
 	}
 	else
@@ -193,11 +195,11 @@ void ImguiShowEntityTab(GameState *gameState)
 			collider->type = COLLIDER_CUBE;
 			collider->cube.radius = 1;
 			collider->cube.offset = {};
-			EntityAssignCollider(gameState, g_debugContext->selectedEntity, collider);
+			EntityAssignCollider(gameState, g_editorContext->selectedEntity, collider);
 		}
 	}
 
-	RigidBody *rigidBody = GetEntityRigidBody(gameState, g_debugContext->selectedEntity);
+	RigidBody *rigidBody = GetEntityRigidBody(gameState, g_editorContext->selectedEntity);
 	if (rigidBody)
 	{
 		bool keep = true;
@@ -221,7 +223,7 @@ void ImguiShowEntityTab(GameState *gameState)
 		}
 		if (!keep)
 		{
-			EntityRemoveRigidBody(gameState, g_debugContext->selectedEntity);
+			EntityRemoveRigidBody(gameState, g_editorContext->selectedEntity);
 		}
 	}
 	else
@@ -236,7 +238,7 @@ void ImguiShowEntityTab(GameState *gameState)
 			rigidBody->dynamicFriction = 0.2f;
 			rigidBody->invMomentOfInertiaTensor = CalculateInverseMomentOfInertiaTensor(*collider,
 					rigidBody->invMass);
-			EntityAssignRigidBody(gameState, g_debugContext->selectedEntity, rigidBody);
+			EntityAssignRigidBody(gameState, g_editorContext->selectedEntity, rigidBody);
 		}
 	}
 }
@@ -267,7 +269,7 @@ void ImguiShowSpringsTab(GameState *gameState)
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Sel##A"))
-		currentSpring->entityA = g_debugContext->selectedEntity;
+		currentSpring->entityA = g_editorContext->selectedEntity;
 
 	if (ImGui::InputScalar("Entity B", ImGuiDataType_U32, &currentSpring->entityB.id, &step))
 	{
@@ -275,7 +277,7 @@ void ImguiShowSpringsTab(GameState *gameState)
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Sel##B"))
-		currentSpring->entityB = g_debugContext->selectedEntity;
+		currentSpring->entityB = g_editorContext->selectedEntity;
 
 	ImGui::DragFloat3("Offset A", currentSpring->offsetA.v, 0.01f);
 	ImGui::DragFloat3("Offset B", currentSpring->offsetB.v, 0.01f);
@@ -287,7 +289,7 @@ void ImguiShowSpringsTab(GameState *gameState)
 
 void ImguiShowPropertiesWindow(GameState *gameState)
 {
-#if DEBUG_BUILD && USING_IMGUI
+#if EDITOR_PRESENT
 	ImGui::SetNextWindowPos(ImVec2(600, 340), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(ImVec2(315, 425), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);

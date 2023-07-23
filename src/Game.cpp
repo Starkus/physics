@@ -7,17 +7,7 @@
 #define STB_SPRINTF_IMPLEMENTATION
 #include "stb/stb_sprintf.h"
 
-#if TARGET_WINDOWS && DEBUG_BUILD
-#define USING_IMGUI 1
-#endif
-
-#if USING_IMGUI && DEBUG_BUILD
-#define EDITOR_PRESENT 1
-#else
-#define EDITOR_PRESENT 0
-#endif
-
-#define IMGUI_SHOW_DEMO
+#define IMGUI_SHOW_DEMO 1
 
 #if USING_IMGUI
 #include <imgui/imgui.h>
@@ -33,6 +23,10 @@
 
 #if DEBUG_BUILD
 DebugContext *g_debugContext;
+#endif
+
+#if EDITOR_PRESENT
+EditorContext *g_editorContext;
 #endif
 
 String TPrintF(const char *format, ...)
@@ -165,6 +159,10 @@ void StartGame()
 	g_debugContext = ALLOC(TransientAllocator, DebugContext);
 	*g_debugContext = {};
 #endif
+#if EDITOR_PRESENT
+	g_editorContext = ALLOC(TransientAllocator, EditorContext);
+	*g_editorContext = {};
+#endif
 
 	// Init game state
 	memset(gameState, 0, sizeof(GameState));
@@ -263,10 +261,10 @@ void StartGame()
 
 #if EDITOR_PRESENT
 		const Resource *shaderEditorSelectedRes = LoadResource(RESOURCETYPE_SHADER, "shaders/shader_editor_selected.b");
-		g_debugContext->editorSelectedProgram = shaderEditorSelectedRes->shader.programHandle;
+		g_editorContext->editorSelectedProgram = shaderEditorSelectedRes->shader.programHandle;
 
 		const Resource *shaderEditorGizmoRes = LoadResource(RESOURCETYPE_SHADER, "shaders/shader_editor_gizmo.b");
-		g_debugContext->editorGizmoProgram = shaderEditorGizmoRes->shader.programHandle;
+		g_editorContext->editorGizmoProgram = shaderEditorGizmoRes->shader.programHandle;
 #endif
 	}
 
@@ -559,12 +557,8 @@ void Render(GameState *gameState, f32 deltaTime)
 			// @Improve: don't rebind program, textures and all for every mesh! Maybe sort by
 			// material.
 			const Resource *materialRes = meshRes->mesh.materialRes;
-#if DEBUG_BUILD
 			if (!materialRes)
-			{
 				materialRes = GetResource("material_default.b");
-			}
-#endif
 
 			BindMaterial(gameState, materialRes, &model);
 
@@ -578,12 +572,9 @@ void Render(GameState *gameState, f32 deltaTime)
 		LevelGeometry *level = &gameState->levelGeometry;
 
 		const Resource *materialRes = level->renderMesh->mesh.materialRes;
-#if DEBUG_BUILD
 		if (!materialRes)
-		{
 			materialRes = GetResource("material_default.b");
-		}
-#endif
+
 		BindMaterial(gameState, materialRes, &MAT4_IDENTITY);
 
 		RenderIndexedMesh(level->renderMesh->mesh.deviceMesh);
@@ -645,26 +636,26 @@ void Render(GameState *gameState, f32 deltaTime)
 
 #if EDITOR_PRESENT
 	// Selected entity
-	if (Transform *selectedEntity = GetEntityTransform(gameState, g_debugContext->selectedEntity))
+	if (Transform *selectedEntity = GetEntityTransform(gameState, g_editorContext->selectedEntity))
 	{
 		SetFillMode(RENDER_LINE);
 
-		UseProgram(g_debugContext->editorSelectedProgram);
-		DeviceUniform viewUniform = GetUniform(g_debugContext->editorSelectedProgram, "view");
+		UseProgram(g_editorContext->editorSelectedProgram);
+		DeviceUniform viewUniform = GetUniform(g_editorContext->editorSelectedProgram, "view");
 		UniformMat4Array(viewUniform, 1, gameState->viewMatrix.m);
-		DeviceUniform projUniform = GetUniform(g_debugContext->editorSelectedProgram, "projection");
+		DeviceUniform projUniform = GetUniform(g_editorContext->editorSelectedProgram, "projection");
 		UniformMat4Array(projUniform, 1, gameState->projMatrix.m);
-		DeviceUniform modelUniform = GetUniform(g_debugContext->editorSelectedProgram, "model");
+		DeviceUniform modelUniform = GetUniform(g_editorContext->editorSelectedProgram, "model");
 
 		static f32 t = 0;
 		t += deltaTime;
-		DeviceUniform timeUniform = GetUniform(g_debugContext->editorSelectedProgram, "time");
+		DeviceUniform timeUniform = GetUniform(g_editorContext->editorSelectedProgram, "time");
 		UniformFloat(timeUniform, t);
 
 		const mat4 model = Mat4Compose(selectedEntity->translation, selectedEntity->rotation);
 		UniformMat4Array(modelUniform, 1, model.m);
 
-		MeshInstance *meshInstance = GetEntityMesh(gameState, g_debugContext->selectedEntity);
+		MeshInstance *meshInstance = GetEntityMesh(gameState, g_editorContext->selectedEntity);
 		if (meshInstance)
 		{
 			const Resource *meshRes = meshInstance->meshRes;
@@ -677,19 +668,19 @@ void Render(GameState *gameState, f32 deltaTime)
 #endif
 }
 
-void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
+void UpdateAndRenderGame(Controller *controller, f32 deltaTime, f32 lastUpdateTook)
 {
 	GameState *gameState = (GameState *)g_memory->transientMem;
 
 	deltaTime *= gameState->timeMultiplier;
 
-#ifdef USING_IMGUI
+#if USING_IMGUI
 
-#ifdef IMGUI_SHOW_DEMO
+#if IMGUI_SHOW_DEMO
 	ImGui::ShowDemoWindow();
 #endif
 
-	ImguiShowDebugWindow(gameState);
+	ImguiShowDebugWindow(gameState, lastUpdateTook);
 	ImguiShowPropertiesWindow(gameState);
 #endif
 
@@ -719,6 +710,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			SimulatePhysics(gameState, physicsStep);
 	}
 
+#if EDITOR_PRESENT
 	// Update editor
 	{
 		// Move camera
@@ -767,6 +759,8 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 
 		// Mouse picking
 		PickingResult pickingResult = PICKING_NOTHING;
+		if (controller->mousePos.x > -INFINITY && controller->mousePos.x < INFINITY &&
+			controller->mousePos.y > -INFINITY && controller->mousePos.y < INFINITY)
 		{
 			v4 worldCursorPos = { controller->mousePos.x, controller->mousePos.y, -1, 1 };
 			mat4 invViewMatrix = gameState->invViewMatrix;
@@ -779,7 +773,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			v3 camPos = gameState->camPos;
 			v3 origin = camPos;
 			v3 dir = cursorXYZ - origin;
-			g_debugContext->hoveredEntity = ENTITY_HANDLE_INVALID;
+			g_editorContext->hoveredEntity = ENTITY_HANDLE_INVALID;
 			f32 closestDistance = INFINITY;
 			for (u32 colliderIdx = 0; colliderIdx < gameState->colliders.count; ++colliderIdx)
 			{
@@ -795,20 +789,20 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 					if (dist < closestDistance)
 					{
 						closestDistance = dist;
-						g_debugContext->hoveredEntity = collider->entityHandle;
+						g_editorContext->hoveredEntity = collider->entityHandle;
 						pickingResult = PICKING_ENTITY;
 					}
 				}
 			}
 
 			// @Hack: hard coded gizmo colliders!
-			if (Transform *selectedEntity = GetEntityTransform(gameState, g_debugContext->selectedEntity))
+			if (Transform *selectedEntity = GetEntityTransform(gameState, g_editorContext->selectedEntity))
 			{
 				Collider gizmoCollider = {};
 				gizmoCollider.type = COLLIDER_CONVEX_HULL;
 
 				Transform gizmoZT;
-				if (g_debugContext->editRelative)
+				if (g_editorContext->editRelative)
 					gizmoZT = *selectedEntity;
 				else
 				{
@@ -827,7 +821,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				f32 dist = V3Length(gameState->camPos - selectedEntity->translation);
 				gizmoCollider.convexHull.scale = 0.2f * dist;
 
-				if (g_debugContext->currentEditMode == EDIT_MOVE)
+				if (g_editorContext->currentEditMode == EDIT_MOVE)
 				{
 					gizmoCollider.convexHull.meshRes = GetResource("editor_arrow_collision.b");
 
@@ -858,7 +852,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 						}
 					}
 				}
-				else if (g_debugContext->currentEditMode == EDIT_ROTATE)
+				else if (g_editorContext->currentEditMode == EDIT_ROTATE)
 				{
 					gizmoCollider.convexHull.meshRes = GetResource("editor_circle_collision.b");
 
@@ -907,9 +901,9 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 			static v2 oldMousePos = controller->mousePos;
 
 			if (controller->editMove.endedDown && controller->editMove.changed)
-				g_debugContext->currentEditMode = EDIT_MOVE;
+				g_editorContext->currentEditMode = EDIT_MOVE;
 			else if (controller->editRotate.endedDown && controller->editRotate.changed)
-				g_debugContext->currentEditMode = EDIT_ROTATE;
+				g_editorContext->currentEditMode = EDIT_ROTATE;
 
 			if (controller->mouseLeft.endedDown && controller->mouseLeft.changed)
 			{
@@ -926,9 +920,9 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				else if (pickingResult == PICKING_GIZMO_ROT_Z)
 					rotatingZ = true;
 				else if (pickingResult == PICKING_NOTHING)
-					g_debugContext->selectedEntity = ENTITY_HANDLE_INVALID;
+					g_editorContext->selectedEntity = ENTITY_HANDLE_INVALID;
 				else
-					g_debugContext->selectedEntity = g_debugContext->hoveredEntity;
+					g_editorContext->selectedEntity = g_editorContext->hoveredEntity;
 			}
 			else if (!controller->mouseLeft.endedDown)
 			{
@@ -940,7 +934,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				rotatingZ = false;
 			}
 
-			if (Transform *selectedEntity = GetEntityTransform(gameState, g_debugContext->selectedEntity))
+			if (Transform *selectedEntity = GetEntityTransform(gameState, g_editorContext->selectedEntity))
 			{
 				v4 entityScreenPos = V4Point(selectedEntity->translation);
 				entityScreenPos = Mat4TransformV4(gameState->viewMatrix, entityScreenPos);
@@ -950,7 +944,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 				if (grabbingX || grabbingY || grabbingZ)
 				{
 					v3 worldDir = { (f32)grabbingX, (f32)grabbingY, (f32)grabbingZ };
-					if (g_debugContext->editRelative)
+					if (g_editorContext->editRelative)
 						worldDir = QuaternionRotateVector(selectedEntity->rotation, worldDir);
 
 					v4 offsetScreenPos = V4Point(selectedEntity->translation + worldDir);
@@ -976,7 +970,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 					// Invert angle if we are grabbing the gizmo from behind it's normal.
 					{
 						v3 worldNormal = { (f32)rotatingX, (f32)rotatingY, (f32)rotatingZ };
-						if (g_debugContext->editRelative)
+						if (g_editorContext->editRelative)
 							worldNormal = QuaternionRotateVector(selectedEntity->rotation, worldNormal);
 						v3 camToObject = selectedEntity->translation - gameState->camPos;
 						f32 dot = V3Dot(worldNormal, camToObject);
@@ -986,7 +980,7 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 
 					v3 euler = { rotatingX * theta, rotatingY * theta, rotatingZ * theta };
 
-					if (g_debugContext->editRelative)
+					if (g_editorContext->editRelative)
 						selectedEntity->rotation = QuaternionMultiply(selectedEntity->rotation,
 							QuaternionFromEulerZYX(euler));
 					else
@@ -999,6 +993,41 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 		}
 
 #if DEBUG_BUILD
+		// @Todo: draw without using debug tools
+		if (Collider *collider = GetEntityCollider(gameState, g_editorContext->selectedEntity))
+		{
+			Transform *transform = GetEntityTransform(gameState, g_editorContext->selectedEntity);
+			switch (collider->type)
+			{
+			case COLLIDER_CUBE:
+			{
+				v3 vertices[24];
+				for (int i = 0; i < 8; ++i)
+					vertices[i] = { -0.5f+(i%2), -0.5f+((i/2)%2), -0.5f+((i/4)%2) };
+				for (int i = 0; i < 8; ++i)
+					vertices[i+8] = { -0.5f+((i/2)%2), -0.5f+(i%2), -0.5f+((i/4)%2) };
+				for (int i = 0; i < 8; ++i)
+					vertices[i+16] = { -0.5f+((i/4)%2), -0.5f+((i/2)%2), -0.5f+(i%2) };
+
+				for (int i = 0; i < 24; ++i)
+				{
+					v3 v = vertices[i];
+					v = QuaternionRotateVector(transform->rotation, v);
+					v *= 2.0f * collider->cube.radius;
+					v += transform->translation;
+					vertices[i] = v;
+				}
+
+				DrawDebugLines(vertices, 24, { 0.0f, 0.7f, 1.0f });
+			} break;
+			}
+		}
+#endif
+	}
+#endif
+
+#if DEBUG_BUILD
+	{
 		if (g_debugContext->drawGJKPolytope)
 		{
 			DebugVertex *gjkVertices;
@@ -1025,8 +1054,8 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 
 			DrawDebugCubeAA({}, 0.04f, {1,0,1});
 		}
-#endif
 	}
+#endif
 
 	// Draw
 	{
@@ -1048,24 +1077,24 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 		// Gizmos
 #if EDITOR_PRESENT
 		{
-			if (Transform *selectedEntity = GetEntityTransform(gameState, g_debugContext->selectedEntity))
+			if (Transform *selectedEntity = GetEntityTransform(gameState, g_editorContext->selectedEntity))
 			{
 				ClearDepthBuffer();
 
-				UseProgram(g_debugContext->editorGizmoProgram);
-				DeviceUniform viewUniform = GetUniform(g_debugContext->editorGizmoProgram, "view");
+				UseProgram(g_editorContext->editorGizmoProgram);
+				DeviceUniform viewUniform = GetUniform(g_editorContext->editorGizmoProgram, "view");
 				UniformMat4Array(viewUniform, 1, gameState->viewMatrix.m);
-				DeviceUniform projUniform = GetUniform(g_debugContext->editorGizmoProgram, "projection");
+				DeviceUniform projUniform = GetUniform(g_editorContext->editorGizmoProgram, "projection");
 				UniformMat4Array(projUniform, 1, gameState->projMatrix.m);
-				DeviceUniform modelUniform = GetUniform(g_debugContext->editorGizmoProgram, "model");
-				DeviceUniform colorUniform = GetUniform(g_debugContext->editorGizmoProgram, "color");
+				DeviceUniform modelUniform = GetUniform(g_editorContext->editorGizmoProgram, "model");
+				DeviceUniform colorUniform = GetUniform(g_editorContext->editorGizmoProgram, "color");
 
 				const Resource *arrowRes = GetResource("editor_arrow.b");
 				const Resource *circleRes = GetResource("editor_circle.b");
 
 				v3 pos = selectedEntity->translation;
 				v4 rot = QUATERNION_IDENTITY;
-				if (g_debugContext->editRelative)
+				if (g_editorContext->editRelative)
 					rot = selectedEntity->rotation;
 
 				f32 gizmoSize = 0.2f;
@@ -1076,27 +1105,27 @@ void UpdateAndRenderGame(Controller *controller, f32 deltaTime)
 
 				UniformMat4Array(modelUniform, 1, gizmoModel.m);
 				UniformV4(colorUniform, { 0, 0, 1, 1 });
-				if (g_debugContext->currentEditMode == EDIT_MOVE)
+				if (g_editorContext->currentEditMode == EDIT_MOVE)
 					RenderIndexedMesh(arrowRes->mesh.deviceMesh);
-				else if (g_debugContext->currentEditMode == EDIT_ROTATE)
+				else if (g_editorContext->currentEditMode == EDIT_ROTATE)
 					RenderIndexedMesh(circleRes->mesh.deviceMesh);
 
 				v4 xRot = QuaternionMultiply(rot, QuaternionFromEulerZYX({ 0, HALFPI, 0 }));
 				gizmoModel = Mat4Compose(pos, xRot, gizmoSize);
 				UniformMat4Array(modelUniform, 1, gizmoModel.m);
 				UniformV4(colorUniform, { 1, 0, 0, 1 });
-				if (g_debugContext->currentEditMode == EDIT_MOVE)
+				if (g_editorContext->currentEditMode == EDIT_MOVE)
 					RenderIndexedMesh(arrowRes->mesh.deviceMesh);
-				else if (g_debugContext->currentEditMode == EDIT_ROTATE)
+				else if (g_editorContext->currentEditMode == EDIT_ROTATE)
 					RenderIndexedMesh(circleRes->mesh.deviceMesh);
 
 				v4 yRot = QuaternionMultiply(rot, QuaternionFromEulerZYX({ -HALFPI, 0, 0 }));
 				gizmoModel = Mat4Compose(pos, yRot, gizmoSize);
 				UniformMat4Array(modelUniform, 1, gizmoModel.m);
 				UniformV4(colorUniform, { 0, 1, 0, 1 });
-				if (g_debugContext->currentEditMode == EDIT_MOVE)
+				if (g_editorContext->currentEditMode == EDIT_MOVE)
 					RenderIndexedMesh(arrowRes->mesh.deviceMesh);
-				else if (g_debugContext->currentEditMode == EDIT_ROTATE)
+				else if (g_editorContext->currentEditMode == EDIT_ROTATE)
 					RenderIndexedMesh(circleRes->mesh.deviceMesh);
 			}
 		}

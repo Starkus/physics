@@ -486,6 +486,17 @@ inline f32 V3Dot(const v3 &a, const v3 &b)
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+inline f32 V3DotAVX2(const v3 &a, const v3 &b)
+{
+	__m128 a_ = _mm_load_ps(a.v);
+	__m128 b_ = _mm_load_ps(b.v);
+	__m128 dot = _mm_dp_ps(a_, b_, 0b01111111);
+	v4 result;
+	_mm_store_ps(result.v, dot);
+	return result.x;
+}
+#define V3Dot V3DotAVX2
+
 inline v3 V3Cross(const v3 &a, const v3 &b)
 {
 	const v3 result =
@@ -496,6 +507,27 @@ inline v3 V3Cross(const v3 &a, const v3 &b)
 	};
 	return result;
 }
+
+inline v3 V3CrossAVX2(const v3 &a, const v3 &b)
+{
+	v4 a_ = { a.x, a.y, a.z, 0 };
+	v4 b_ = { b.x, b.y, b.z, 0 };
+	__m128 a_xyz0 = _mm_load_ps(a_.v);
+	__m128 b_xyz0 = _mm_load_ps(b_.v);
+
+	// Calculate cross product swizzled as yzx, then swizzle to xyz. This saves one shuffle
+	// instruction.
+	__m128 a_zxy0 = _mm_permute_ps(a_xyz0, 0b11010010);
+	__m128 b_zxy0 = _mm_permute_ps(b_xyz0, 0b11010010);
+	__m128 cross_yzx = _mm_mul_ps(a_xyz0, b_zxy0);
+	cross_yzx = _mm_fmsub_ps(a_zxy0, b_xyz0, cross_yzx);
+	__m128 cross = _mm_permute_ps(cross_yzx, 0b11010010);
+
+	v4 result;
+	_mm_store_ps(result.v, cross);
+	return result.xyz;
+}
+#define V3Cross V3CrossAVX2
 
 inline v3 V3Scale(const v3 &v, const v3 &scale)
 {
@@ -906,6 +938,54 @@ inline v3 QuaternionRotateVector(const v4 &q, const v3 &v)
 
 	return result;
 }
+
+inline v3 QuaternionRotateVectorAVX2(const v4 &q, const v3 &v)
+{
+#if 0
+	u32 aux; int cpuInfo[4], functionId;
+	__cpuid(cpuInfo, functionId);
+	u64 timestampStart = __rdtscp(&aux);
+#endif
+
+	v4 v_ = { v.x, v.y, v.z, 0 };
+	__m128 q_xyzw = _mm_load_ps(q.v);
+	__m128 v_xyz0 = _mm_load_ps(v_.v);
+
+	// Calculate cross product swizzled as yzx, then swizzle to xyz. This saves one shuffle
+	// instruction.
+	__m128 v_zxy0 = _mm_permute_ps(v_xyz0, 0b11010010);
+	__m128 q_zxyw = _mm_permute_ps(q_xyzw, 0b11010010);
+	__m128 q2vCross_yzx = _mm_mul_ps(q_xyzw, v_zxy0);
+	q2vCross_yzx = _mm_fmsub_ps(q_zxyw, v_xyz0, q2vCross_yzx);
+	__m128 q2vCross = _mm_permute_ps(q2vCross_yzx, 0b11010010);
+
+	__m128 q2vDot = _mm_dp_ps(q_xyzw, v_xyz0, 0b01111111);
+
+	// vCoef = w^2 - V3SqrLen(q.xyz)
+	__m128 w = _mm_permute_ps(q_xyzw, 0b11111111);
+	__m128 w2 = _mm_add_ps(w, w);
+	__m128 qvecSqrLen = _mm_dp_ps(q_xyzw, q_xyzw, 0b01111111);
+	__m128 vCoef = _mm_fmsub_ps(w, w, qvecSqrLen);
+
+	__m128 q2vDot2 = _mm_add_ps(q2vDot, q2vDot);
+
+	__m128 result = _mm_mul_ps(q_xyzw, q2vDot2);
+	result = _mm_fmadd_ps(v_xyz0, vCoef, result);
+	result = _mm_fmadd_ps(q2vCross, w2, result);
+
+	_mm_store_ps(v_.v, result);
+
+#if 0
+	u64 timestampEnd = __rdtsc();
+	__cpuid(cpuInfo, functionId);
+	char buf[512];
+	sprintf(buf, "QuaternionRotateVectorSSE took: %llu\n\0", timestampEnd - timestampStart);
+	OutputDebugString(buf);
+#endif
+
+	return v_.xyz;
+}
+#define QuaternionRotateVector QuaternionRotateVectorAVX2
 
 inline v4 QuaternionMultiply(const v4 &a, const v4 &b)
 {

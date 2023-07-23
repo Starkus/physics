@@ -35,25 +35,6 @@ struct DebugGeometryBuffer
 	u32 debugCubeCount;
 };
 
-// @Improve: this is garbage
-enum PickingResult
-{
-	PICKING_NOTHING = 0,
-	PICKING_ENTITY = 1,
-	PICKING_GIZMO_ROT_X = 2,
-	PICKING_GIZMO_ROT_Y = 3,
-	PICKING_GIZMO_ROT_Z = 4,
-	PICKING_GIZMO_X = 5,
-	PICKING_GIZMO_Y = 6,
-	PICKING_GIZMO_Z = 7,
-};
-
-enum EditMode
-{
-	EDIT_MOVE,
-	EDIT_ROTATE
-};
-
 struct DebugContext
 {
 	DeviceProgram debugDrawProgram, debugCubesProgram;
@@ -86,17 +67,39 @@ struct DebugContext
 	int polytopeStepsVertexCounts[epaMaxSteps];
 	v3 epaNewPoint[epaMaxSteps];
 
+	bool pauseUpdates;
 	bool pausePhysics;
 	bool pausePhysicsOnContact;
 	bool resetMomentum;
+};
+#endif
 
-	// Editor
+#if EDITOR_PRESENT
+// @Improve: this is garbage
+enum PickingResult
+{
+	PICKING_NOTHING = 0,
+	PICKING_ENTITY = 1,
+	PICKING_GIZMO_ROT_X = 2,
+	PICKING_GIZMO_ROT_Y = 3,
+	PICKING_GIZMO_ROT_Z = 4,
+	PICKING_GIZMO_X = 5,
+	PICKING_GIZMO_Y = 6,
+	PICKING_GIZMO_Z = 7,
+};
+
+enum EditMode
+{
+	EDIT_MOVE,
+	EDIT_ROTATE
+};
+
+struct EditorContext
+{
 	EntityHandle selectedEntity = ENTITY_HANDLE_INVALID;
 	EntityHandle hoveredEntity;
 	EditMode currentEditMode;
 	bool editRelative;
-
-	bool pauseUpdates;
 
 	DeviceProgram editorSelectedProgram;
 	DeviceProgram editorGizmoProgram;

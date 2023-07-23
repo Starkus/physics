@@ -300,4 +300,6 @@ mat3 CalculateInverseMomentOfInertiaTensor(Collider collider, f32 invMass)
 		};
 	}
 	}
+	ASSERT(!"unrecognized collider type");
+	return {};
 }

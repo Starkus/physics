@@ -1,31 +1,12 @@
-#if PREPROCESSING
-@Ignore #include <stdint.h>
-@Ignore #include <stdio.h>
-#else
 #include <stdint.h>
 #include <stdio.h>
-#endif
 
 // We don't support any non IEEE754 arch for now.
 #define ASSUME_IEEE754 1
 
-#if defined(WIN32) || defined(_WIN32)
-#define TARGET_WINDOWS 1
-#else
-#define TARGET_WINDOWS 0
-#endif
-
 #if !TARGET_WINDOWS
-#if PREPROCESSING
-@Ignore #include <assert.h>
-#else
 #include <assert.h>
-#endif
 #define MAX_PATH PATH_MAX
-#endif
-
-#if PREPROCESSING
-@Ignore #define USING_TYPE_INFO 1
 #endif
 
 #define CODE_RELOAD 1

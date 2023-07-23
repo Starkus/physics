@@ -829,13 +829,6 @@ void GetAABB(Transform *transform, Collider *c, v3 *min, v3 *max)
 
 	*min += transform->translation;
 	*max += transform->translation;
-
-#if DEBUG_BUILD
-	if (g_debugContext->drawAABBs)
-	{
-		DrawDebugWiredBox(*min, *max);
-	}
-#endif
 }
 
 v3 FurthestInDirection(Transform *transform, Collider *c, v3 dir)
@@ -970,6 +963,51 @@ inline GJKPoint GJKSupport(Transform *transformA, Transform *transformB, Collide
 	return { a - b, a };
 }
 
+inline bool TestAABBs(v3 minA, v3 maxA, v3 minB, v3 maxB)
+{
+	bool hit = (minA.x <= maxB.x && minB.x <= maxA.x) &&
+			   (minA.y <= maxB.y && minB.y <= maxA.y) &&
+			   (minA.z <= maxB.z && minB.z <= maxA.z);
+
+#if DEBUG_BUILD
+	if (g_debugContext->drawAABBs)
+	{
+		v3 color = hit ? v3{0,0.9f,0} : v3{0.7f,0,0};
+		DrawDebugWiredBox(minA, maxA, color);
+		DrawDebugWiredBox(minB, maxB, color);
+	}
+#endif
+
+	return hit;
+}
+
+inline bool TestAABBsAVX2(v3 minA, v3 maxA, v3 minB, v3 maxB)
+{
+	__m128 a = _mm_load_ps(minA.v);
+	__m128 A = _mm_load_ps(maxA.v);
+	__m128 b = _mm_load_ps(minB.v);
+	__m128 B = _mm_load_ps(maxB.v);
+
+	__m128i test1 = _mm_castps_si128(_mm_cmpgt_ps(a, B));
+	__m128i test2 = _mm_castps_si128(_mm_cmpgt_ps(b, A));
+	__m128i test = _mm_or_si128(test1, test2);
+	bool hit = _mm_testz_si128(test, _mm_set_epi32(0, U32_MAX, U32_MAX, U32_MAX));
+
+	ASSERT(TestAABBs(minA, maxA, minB, maxB) == hit);
+
+#if DEBUG_BUILD
+	if (g_debugContext->drawAABBs)
+	{
+		v3 color = hit ? v3{0,0.9f,0} : v3{0.7f,0,0};
+		DrawDebugWiredBox(minA, maxA, color);
+		DrawDebugWiredBox(minB, maxB, color);
+	}
+#endif
+
+	return hit;
+}
+#define TestAABBs TestAABBsAVX2
+
 GJKResult GJKTest(Transform *transformA, Transform *transformB, Collider *colliderA,
 		Collider *colliderB)
 {
@@ -983,18 +1021,6 @@ GJKResult GJKTest(Transform *transformA, Transform *transformB, Collider *collid
 
 	GJKResult result;
 	result.hit = true;
-
-	v3 minA, maxA;
-	GetAABB(transformA, colliderA, &minA, &maxA);
-	v3 minB, maxB;
-	GetAABB(transformB, colliderB, &minB, &maxB);
-	if ((minA.x >= maxB.x || minB.x >= maxA.x) ||
-		(minA.y >= maxB.y || minB.y >= maxA.y) ||
-		(minA.z >= maxB.z || minB.z >= maxA.z))
-	{
-		result.hit = false;
-		return result;
-	}
 
 	int foundPointsCount = 1;
 	v3 testDir = { 0, 1, 0 }; // Random initial test direction
@@ -1664,14 +1690,16 @@ CollisionInfo TestCollision(GameState *gameState, Transform *transformA, Transfo
 		}
 #endif
 
+		v3 hitA = {};
+		ProjectToTriangle(worldA, result.hitNormal, &worldTriangle, &hitA);
+
+#if DEBUG_BUILD
 		v3 color = { f32(ii%2), f32((ii/2)%2), f32((ii/4)%2) };
 		++ii;
 		DrawDebugCubeAA(worldA, 0.04f, color);
 		DrawDebugCubeAA(worldB, 0.04f, color * 0.5f);
-
-		v3 hitA = {};
-		ProjectToTriangle(worldA, result.hitNormal, &worldTriangle, &hitA);
 		DrawDebugArrow(worldA, hitA, color);
+#endif
 
 		v3 depthVec = hitA - worldA;
 		f32 depth = V3Dot(depthVec, result.hitNormal);

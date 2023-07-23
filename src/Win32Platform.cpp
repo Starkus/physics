@@ -1,11 +1,11 @@
 #include <windows.h>
 #include <strsafe.h>
 
-#if DEBUG_BUILD
+#if TARGET_WINDOWS
 #define USING_IMGUI 1
 #endif
 
-#if USING_IMGUI && DEBUG_BUILD
+#if USING_IMGUI
 #define EDITOR_PRESENT 1
 #else
 #define EDITOR_PRESENT 0
@@ -458,10 +458,10 @@ void Win32Start(HINSTANCE hInstance)
 
 	LARGE_INTEGER largeInteger;
 	QueryPerformanceCounter(&largeInteger);
-	u64 lastPerfCounter = largeInteger.LowPart;
+	u64 lastPerfCounter = largeInteger.QuadPart;
 
 	QueryPerformanceFrequency(&largeInteger);
-	u64 perfFrequency = largeInteger.LowPart;
+	u64 perfFrequency = largeInteger.QuadPart;
 
 	ResourceBank resourceBank;
 	ArrayInit(&resourceBank.resources, 256);
@@ -476,11 +476,13 @@ void Win32Start(HINSTANCE hInstance)
 
 	StartGame();
 
+	f32 lastUpdateTook = 0;
+
 	bool running = true;
 	while (running)
 	{
 		QueryPerformanceCounter(&largeInteger);
-		const u64 newPerfCounter = largeInteger.LowPart;
+		const u64 newPerfCounter = largeInteger.QuadPart;
 		//const f64 time = (f64)newPerfCounter / (f64)perfFrequency;
 		const f32 deltaTime = (f32)(newPerfCounter - lastPerfCounter) / (f32)perfFrequency;
 
@@ -511,7 +513,11 @@ void Win32Start(HINSTANCE hInstance)
 		ImGui::NewFrame();
 #endif
 
-		UpdateAndRenderGame(&controller, deltaTime);
+		UpdateAndRenderGame(&controller, deltaTime, lastUpdateTook);
+
+		QueryPerformanceCounter(&largeInteger);
+		const u64 afterUpdatePerfCounter = largeInteger.QuadPart;
+		lastUpdateTook = (f32)(afterUpdatePerfCounter - newPerfCounter) / (f32)perfFrequency;
 
 #ifdef USING_IMGUI
 		if (g_showConsole)

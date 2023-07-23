@@ -1,5 +1,21 @@
 void SimulatePhysics(GameState *gameState, f32 deltaTime)
 {
+	// Calculate AABBs
+	struct AABB
+	{
+		v3 min;
+		v3 max;
+	};
+	Array<AABB, FrameAllocator> AABBs;
+	ArrayInit(&AABBs, gameState->colliders.count);
+	for (u32 colliderIdx = 0; colliderIdx < gameState->colliders.count; ++colliderIdx)
+	{
+		Collider *collider = &gameState->colliders[colliderIdx];
+		Transform *transform = GetEntityTransform(gameState, collider->entityHandle);
+		AABB *aabb = ArrayAdd(&AABBs);
+		GetAABB(transform, collider, &aabb->min, &aabb->max);
+	}
+
 	struct Collision
 	{
 		EntityHandle entityA;
@@ -21,14 +37,18 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		Collider *colliderA = &gameState->colliders[colliderAIdx];
 		Transform *transformA = GetEntityTransform(gameState, colliderA->entityHandle);
 		ASSERT(transformA); // There should never be an orphaned collider.
+		AABB aabbA = AABBs[colliderAIdx];
 
 		for (u32 colliderBIdx = colliderAIdx + 1; colliderBIdx < gameState->colliders.count; ++colliderBIdx)
 		{
 			Collider *colliderB = &gameState->colliders[colliderBIdx];
 			Transform *transformB = GetEntityTransform(gameState, colliderB->entityHandle);
 			ASSERT(transformB); // There should never be an orphaned collider.
+			AABB aabbB = AABBs[colliderAIdx];
 
-			// @Improve: better collision against multiple colliders?
+			if (!TestAABBs(aabbA.min, aabbA.max, aabbB.min, aabbB.max))
+				continue;
+
 			CollisionInfo collisionInfo = TestCollision(gameState, transformA, transformB,
 					colliderA, colliderB);
 			if (collisionInfo.hitCount)
@@ -56,8 +76,10 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		}
 	}
 
+#if DEBUG_BUILD
 	if (g_debugContext->pausePhysics)
 		return;
+#endif
 
 	for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
 	{
@@ -132,7 +154,9 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 			ASSERT(impulseScalar >= 0);
 			v3 impulseVector = hitNormal * impulseScalar;
 
+#if DEBUG_BUILD
 			DrawDebugArrow(hit, hit + impulseVector * 10.0f, {1,0,1});
+#endif
 
 			// Store normal impulse scalar to calculate friction
 			collision->normalImpulseMags[hitIdx] = impulseScalar;
@@ -165,7 +189,9 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 	}
 
 	// Friction impulse
+#if DEBUG_BUILD
 	if (!g_debugContext->disableFriction)
+#endif
 	{
 		for (u32 collisionIdx = 0; collisionIdx < collisions.count; ++collisionIdx)
 		{
@@ -233,12 +259,12 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 				if (Abs(impulseScalar) <= normalImpulseMag * staticFriction)
 				{
 					impulseVector = tangent * impulseScalar;
-					DrawDebugArrow(hit, hit + impulseVector * 10.0f, {1,0,0});
+					DEBUG_ONLY(DrawDebugArrow(hit, hit + impulseVector * 10.0f, {1,0,0}));
 				}
 				else
 				{
 					impulseVector = tangent * -normalImpulseMag * dynamicFriction;
-					DrawDebugArrow(hit, hit + impulseVector * 10.0f, {0,1,0});
+					DEBUG_ONLY(DrawDebugArrow(hit, hit + impulseVector * 10.0f, {0,1,0}));
 				}
 
 				v3 force = impulseVector / deltaTime;
@@ -279,7 +305,9 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		v3 rA = TransformDirection(*transformA, spring->offsetA);
 		v3 rB = TransformDirection(*transformB, spring->offsetB);
 
+#if DEBUG_BUILD
 		DrawDebugLine(transformA->translation + rA, transformB->translation + rB, { 0.9f, 0.9f, 0.9f });
+#endif
 
 		v3 ab = (transformB->translation + rB) - (transformA->translation + rA);
 		f32 currentDistance = V3Length(ab);
@@ -326,7 +354,9 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 	}
 
 	// Depenetrate
+#if DEBUG_BUILD
 	if (!g_debugContext->disableDepenetration)
+#endif
 	{
 		for (u32 collisionIdx = 0; collisionIdx < collisions.count; ++collisionIdx)
 		{
@@ -389,6 +419,7 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		rigidBody->angularVelocity -= rigidBody->angularVelocity * deltaTime * angularDrag;
 	}
 
+#if DEBUG_BUILD
 	if (g_debugContext->resetMomentum)
 	{
 		for (u32 rigidBodyIdx = 0; rigidBodyIdx < gameState->rigidBodies.count; ++rigidBodyIdx)
@@ -400,4 +431,5 @@ void SimulatePhysics(GameState *gameState, f32 deltaTime)
 		}
 		g_debugContext->resetMomentum = false;
 	}
+#endif
 }
